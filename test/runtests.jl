@@ -86,7 +86,7 @@ end
             end
         end
         covs[i] = m
-        ns[i] = 20 +2*i
+        ns[i] = 20 + 2*i
     end
 
     # Start at the truth
@@ -95,16 +95,19 @@ end
     b = core(covs, ns, ndim=3, maxiter=100, params=params)
 
     # Start at a random point
-    params = randn(p, 3)
-    s = svd(params)
-    params = s.U
-    c = core(covs, ns, params=params, maxiter=1000, ndim=3)
+    for k in 1:10
+        params = randn(p, 3)
+        s = svd(params)
+        params = s.U
+        c = core(covs, ns, params=params, maxiter=2000, ndim=3)
 
-    # Check that the projection matrices are the same
-    @test isapprox(b.dirs * transpose(b.dirs), c.dirs * transpose(c.dirs),
-                   atol=0.01, rtol=0.01)
+        # Check that the projection matrices are the same
+        @test isapprox(b.dirs * transpose(b.dirs), c.dirs * transpose(c.dirs),
+                       atol=0.01, rtol=0.01)
 
-    # Check that the log-likelihood is about the same
-    @test b.llf - c.llf < 0.001
+        # Check that the log-likelihood is about the same
+        @test b.llf - c.llf < 0.001
+    end
 
 end
+

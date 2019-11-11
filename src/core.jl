@@ -19,9 +19,15 @@ orthogonality constraints. SIAM J Matrix Anal Appl.
 http://math.mit.edu/~edelman/publications/geometry_of_algorithms.pdf
 """
 function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; maxiter::Integer=500,
-                    gtol::Float64=0.001)::Tuple{Array{Float64}, Float64, Bool}
+                    gtol::Float64=0.001)::Tuple{Array{Float64}, Float64, Bool, Vector}
 
     p, d = size(params)
+
+    # Just in case the starting values are not feasible
+    params = svd(params).U
+
+    # History of function values and gradient norms
+    hist = Vector()
 
     # Workspaces
     pa = zeros(Float64, p, d)
@@ -29,7 +35,6 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
     pa1 = zeros(Float64, p, d)
     g = zeros(Float64, p, d)
     h = zeros(Float64, p, d)
-    params1 = zeros(Float64, p, d)
 
     # Initial function value
     f0 = fun(params)
@@ -37,11 +42,13 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
     # Initial gradient
     grad!(params, g)
     g -= params * transpose(params) * g
-    if dot(g, g) < gtol
+    gn = sqrt(dot(g, g))
+    if gn < gtol
         # Starting value is already converged
         cnvrg = true
-        return (params, f0, true)
+        return (params, f0, true, hist)
     end
+    push!(hist, (f0, gn))
 
     # Initial search direction
     h .= -g
@@ -51,11 +58,7 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
 
     for iter in 1:maxiter
 
-        # Make sure that params is orthogonal and the search direction
-        # is orthogonal to params
-        params = svd(params).U
-        h -= params * transpose(params) * h
-
+        h -= params * (transpose(params) * h)
         s = svd(h)
 
         pa0 .= params * s.V
@@ -75,7 +78,7 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
 
             f1 = fun(pa)
             if f1 < f0
-                params1 .= pa
+                params .= pa
                 f0 = f1
                 success = true
                 break
@@ -84,25 +87,31 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
         end
 
         if !success
-            # This may happen when params needs to be re-orthogonalized
+            # Reset and try again
+            params = svd(params).U
+            #grad!(params, g)
+            #g += 0.1*randn(p, d)
+            #g -= params * transpose(params) * g
+            #h .= -g
             continue
         end
 
         # Get the next gradient
-        grad!(params1, g)
-        g -= params1 * transpose(params1) * g
-        if dot(g, g) < gtol
+        grad!(params, g)
+        g -= params * transpose(params) * g
+        gn = sqrt(dot(g, g))
+        push!(hist, (f0, gn))
+        if gn < gtol
             cnvrg = true
             break
         end
 
         # Prepare for the next step
-        params .= params1
         h .= -g
 
     end
 
-    return (params, f0, cnvrg)
+    return (params, f0, cnvrg, hist)
 
 end
 
@@ -192,11 +201,18 @@ end
 CORE (covariance reduction) is a method for understanding the unique features
 of matrices within a collection of covariance matrices.  The `CORE` result
 contains the projection directions `dirs` and the optimized log-likelihood
-function value `llf`.`
+function value `llf`.
 """
 struct CORE
+
+    # The covariance reduction matrix
     dirs::Array{Float64, 2}
+
+    # The log-likelihood at the optimum
     llf::Float64
+
+    # Log-likeihood, score norm pairs for each iteration
+    hist::Vector
 end
 
 """
@@ -244,8 +260,8 @@ function core(covs::Array{Array{S, 2}}, ns::Array{T}; ndim::Integer=1,
         g *= -1
     end
 
-    params, llf, cnvrg = grass_opt(params, x->-core_loglike(co, x),
-                                   score!; maxiter=maxiter, gtol=gtol)
+    params, llf, cnvrg, hist = grass_opt(params, x->-core_loglike(co, x),
+                                         score!; maxiter=maxiter, gtol=gtol)
 
     # Flip the polarity back to the usual direction
     llf *= -1
@@ -259,7 +275,7 @@ function core(covs::Array{Array{S, 2}}, ns::Array{T}; ndim::Integer=1,
         @Printf.printf("CORE optimization did not converge, |g|=%f\n", gn)
     end
 
-    results = CORE(params, llf)
+    results = CORE(params, llf, hist)
 
     return results
 end
