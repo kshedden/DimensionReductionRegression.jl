@@ -95,19 +95,32 @@ end
     b = core(covs, ns, ndim=3, maxiter=100, params=params)
 
     # Start at a random point
-    for k in 1:10
+    nfail1 = 0
+    nfail2 = 0
+    for k in 1:100
         params = randn(p, 3)
         s = svd(params)
         params = s.U
-        c = core(covs, ns, params=params, maxiter=2000, ndim=3)
+        c = core(covs, ns, params=params, ndim=3)
 
         # Check that the projection matrices are the same
-        @test isapprox(b.dirs * transpose(b.dirs), c.dirs * transpose(c.dirs),
-                       atol=0.01, rtol=0.01)
+        t1 = b.proj * transpose(b.proj)
+        t2 = c.proj * transpose(c.proj)
+        e1 = maximum(abs.(t1 - t2))
+        if e1 > 0.001
+            nfail1 += 1
+        end
 
         # Check that the log-likelihood is about the same
-        @test b.llf - c.llf < 0.001
+        e2 = b.llf - c.llf
+        if e2 > 0.001
+            nfail2 += 1
+        end
+
     end
+
+    @test nfail1 <= 10
+    @test nfail2 <= 10
 
 end
 

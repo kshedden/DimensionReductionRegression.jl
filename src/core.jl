@@ -1,5 +1,5 @@
 """
-    grass_opt(params, fun, grad!; maxiter=500, gtol=0.001) -> Tuple
+    grass_opt(params, fun, grad!, maxiter, gtol) -> Tuple
 
 Minimize a function on a Grassmann manifold using steepest descent.
 
@@ -18,8 +18,8 @@ A Edelman, TA Arias, ST Smith (1998).  The geometry of algorithms with
 orthogonality constraints. SIAM J Matrix Anal Appl.
 http://math.mit.edu/~edelman/publications/geometry_of_algorithms.pdf
 """
-function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; maxiter::Integer=500,
-                    gtol::Float64=0.001)::Tuple{Array{Float64}, Float64, Bool, Vector}
+function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function, maxiter::Integer,
+                    gtol::Float64)::Tuple{Array{Float64}, Float64, Bool, Vector}
 
     p, d = size(params)
 
@@ -39,26 +39,23 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
     # Initial function value
     f0 = fun(params)
 
-    # Initial gradient
-    grad!(params, g)
-    g -= params * transpose(params) * g
-    gn = sqrt(dot(g, g))
-    if gn < gtol
-        # Starting value is already converged
-        cnvrg = true
-        return (params, f0, true, hist)
-    end
-    push!(hist, (f0, gn))
-
-    # Initial search direction
-    h .= -g
-
     # Convergence status
     cnvrg = false
 
     for iter in 1:maxiter
 
-        h -= params * (transpose(params) * h)
+        # Gradient
+        grad!(params, g)
+        g .= g .- params * (transpose(params) * g)
+        gn = sqrt(dot(g, g))
+        push!(hist, (f0, gn))
+        if gn < gtol
+            cnvrg = true
+            return (params, f0, true, hist)
+        end
+
+        # Search direction
+        h .= -g
         s = svd(h)
 
         pa0 .= params * s.V
@@ -87,27 +84,9 @@ function grass_opt(params::Array{Float64, 2}, fun::Function, grad!::Function; ma
         end
 
         if !success
-            # Reset and try again
-            params = svd(params).U
-            #grad!(params, g)
-            #g += 0.1*randn(p, d)
-            #g -= params * transpose(params) * g
-            #h .= -g
-            continue
-        end
-
-        # Get the next gradient
-        grad!(params, g)
-        g -= params * transpose(params) * g
-        gn = sqrt(dot(g, g))
-        push!(hist, (f0, gn))
-        if gn < gtol
-            cnvrg = true
+            # Not sure what to do here
             break
         end
-
-        # Prepare for the next step
-        h .= -g
 
     end
 
@@ -163,6 +142,31 @@ function _marg_cov!(c::_core)
 
 end
 
+function _check_gradient(co, pt::Array{Float64})
+
+    p, d = size(pt)
+    fun = x -> core_loglike(co, x)
+
+    # Analytic gradient
+    ag = zeros(p, d)
+    core_score!(co, pt, ag)
+
+    # Numerical gradient
+    e = 1e-8
+    ng = zeros(p, d)
+    f0 = fun(pt)
+    for i in 1:p
+        for j in 1:d
+            pt[i, j] += e
+            ng[i, j] = (fun(pt) - f0) / e
+            pt[i, j] -= e
+        end
+    end
+
+    @assert isapprox(ag, ng, atol=0.01, rtol=0.01)
+
+end
+
 # The log-likelihood of a CORE model.
 function core_loglike(co::_core, params::Array{Float64, 2})::Float64
 
@@ -190,7 +194,7 @@ function core_score!(co::_core, params::Array{Float64, 2}, g::Array{Float64, 2})
     for i in 1:length(co.covs)
         c0 .= transpose(params) * co.covs[i] * params
         cP .= co.covs[i] * params
-        g -= co.ns[i] * cP / c0
+        g .= g .- co.ns[i] * cP / c0
     end
 
 end
@@ -198,25 +202,28 @@ end
 """
     CORE
 
-CORE (covariance reduction) is a method for understanding the unique features
-of matrices within a collection of covariance matrices.  The `CORE` result
-contains the projection directions `dirs` and the optimized log-likelihood
-function value `llf`.
+CORE (covariance reduction) is a dimension reduction method for understanding
+the unique features of matrices within a collection of covariance matrices.
+The `CORE` result contains the projection directions `proj` and the optimized
+log-likelihood function value `llf`.
 """
 struct CORE
 
     # The covariance reduction matrix
-    dirs::Array{Float64, 2}
+    proj::Array{Float64, 2}
 
     # The log-likelihood at the optimum
     llf::Float64
 
     # Log-likeihood, score norm pairs for each iteration
     hist::Vector
+
+	# A convergence message
+    msg::String
 end
 
 """
-    core(covs, ns, ndim=1, params=Array{Float64}(0, 0), maxiter=500, gtol=0.001)
+    core(covs, ns, ndim=1, params=Array{Float64}(0, 0), maxiter, gtol)
 
 Given a collection of covariance matrices C1, ..., Cm, covariance reduction (CORE)
 finds an orthogonal matrix Q such that the reduced matrices Q'*Cj*Q capture most of
@@ -240,7 +247,7 @@ http://math.mit.edu/~edelman/publications/geometry_of_algorithms.pdf
 """
 function core(covs::Array{Array{S, 2}}, ns::Array{T}; ndim::Integer=1,
               params::Array{Float64}=Array{Float64}(undef, 0),
-              maxiter::Integer=500, gtol::Real=0.001) where {S<:AbstractFloat, T<:Integer}
+              maxiter::Integer=10000, gtol::Real=1e-10) where {S<:AbstractFloat, T<:Integer}
 
     p = size(covs[1])[1]
     nobs = sum(ns)
@@ -257,25 +264,31 @@ function core(covs::Array{Array{S, 2}}, ns::Array{T}; ndim::Integer=1,
     # Wrap the score function so we can flip the polarity.
     function score!(x::Array{Float64, 2}, g::Array{Float64, 2})
         core_score!(co, x, g)
-        g *= -1
+        g .*= -1
+    end
+
+    # Used for debugging
+    if false
+        _check_gradient(co, params)
     end
 
     params, llf, cnvrg, hist = grass_opt(params, x->-core_loglike(co, x),
-                                         score!; maxiter=maxiter, gtol=gtol)
+                                         score!, maxiter, gtol)
 
     # Flip the polarity back to the usual direction
     llf *= -1
 
     # If the algorithm did not converge, print a warning.
+    msg = "CORE optimization converged successfully"
     if !cnvrg
         g = zeros(Float64, p, ndim)
         core_score!(co, params, g)
         g -= sum(g .* params) .* params / sum(params .* params)
         gn = sqrt(sum(g .* g))
-        @Printf.printf("CORE optimization did not converge, |g|=%f\n", gn)
+        msg = @Printf.sprintf("CORE optimization did not converge, |g|=%14.10f\n", gn)
     end
 
-    results = CORE(params, llf, hist)
+    results = CORE(params, llf, hist, msg)
 
     return results
 end
