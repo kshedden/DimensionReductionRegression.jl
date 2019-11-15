@@ -278,13 +278,11 @@ function core(covs::Array{Array{S, 2}}, ns::Array{T}; ndim::Integer=1,
     # Flip the polarity back to the usual direction
     llf *= -1
 
-    # If the algorithm did not converge, print a warning.
+    # If the algorithm did not converge, provide a warning.
     msg = "CORE optimization converged successfully"
     if !cnvrg
         g = zeros(Float64, p, ndim)
-        core_score!(co, params, g)
-        g -= sum(g .* params) .* params / sum(params .* params)
-        gn = sqrt(sum(g .* g))
+        gn = hist[end][end]
         msg = @Printf.sprintf("CORE optimization did not converge, |g|=%14.10f\n", gn)
     end
 
