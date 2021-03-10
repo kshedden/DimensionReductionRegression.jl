@@ -4,30 +4,29 @@ using Dimred, Test, Random, LinearAlgebra
 
     Random.seed!(2142)
 
-    n = 25002
-    r = 0.5
+    n = 5000     # Sample size
+    r = 0.5      # Correlation between variables
+    td = [1, -2] # True direction
 
+    # Test with different floating point widths
     for j in 1:4
+
+        # A nonlinear single-index model
         x = randn(n, 2)
         x[:, 2] .= r*x[:, 1] + sqrt(1-r^2)*x[:, 2]
-        y = 0.1*randn(n) + x * [1, -2]
+        lp = x * td
+        y = 0.1*randn(n) + 1 ./ (1.0 .+ lp.^3)
 
-        if j < 3
-            xx = x
-        else
-            xx = convert(Array{Float32}, x)
-        end
+	xx = j < 3 ? x : Array{Float32}(x)
+        yy = rem(j, 2) == 1 ? y : Array{Float32}(y)
 
-        if rem(j, 2) == 1
-            yy = y
-        else
-            yy = convert(Array{Float32}, y)
-        end
+        rd = sir(yy, xx, nslice=100, ndir=1)
 
-        rd = sir(yy, xx; ndir=1)
+        println(sir_test(rd))
 
-        @test isapprox(rd.dirs[2, 1] / rd.dirs[1, 1], -2, atol=0.01, rtol=0.05)
-        @test isapprox(rd.eigs, [1, 0], atol=0.15)
+	ed = rd.dirs[:, 1]
+        @test isapprox(ed[2] / ed[1], td[2] / td[1], atol=0.01, rtol=0.05)
+        @test abs(rd.eigs[1] / rd.eigs[2]) > 10
 
     end
 end
@@ -36,31 +35,27 @@ end
 
     Random.seed!(2142)
 
-    n = 25002
-    r = 0.5
+    n = 2500     # Sample size
+    r = 0.5      # Correlation between variables
+    td = [1, -2] # True direction
 
+    # Test with different floating point widths
     for j in 1:4
+
+        # A nonlinear single-index model
         x = randn(n, 2)
         x[:, 2] .= r*x[:, 1] + sqrt(1-r^2)*x[:, 2]
-        lp = x * [1, -2]
+        lp = x * td
         y = 0.1*randn(n) + 1 ./ (1.0 .+ lp.^2)
 
-        if j < 3
-            xx = x
-        else
-            xx = convert(Array{Float32}, x)
-        end
-
-        if rem(j, 2) == 1
-            yy = y
-        else
-            yy = convert(Array{Float32}, y)
-        end
+	xx = j < 3 ? x : Array{Float32}(x)
+        yy = rem(j, 2) == 1 ? y : Array{Float32}(y)
 
         rd = phd(yy, xx; ndir=1)
 
-        @test isapprox(rd.dirs[2, 1] / rd.dirs[1, 1], -2, atol=0.01, rtol=0.05)
-        @test abs(rd.eigs[1] / rd.eigs[2]) > 50
+	ed = rd.dirs[:, 1]
+        @test isapprox(ed[2] / ed[1], td[2] / td[1], atol=0.01, rtol=0.05)
+        @test abs(rd.eigs[1] / rd.eigs[2]) > 10
     end
 end
 
@@ -123,4 +118,3 @@ end
     @test nfail2 <= 10
 
 end
-

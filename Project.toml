@@ -1,0 +1,10 @@
+name = "Dimred"
+uuid = "01ee8da8-f58f-4cf6-bc56-622232f1a41a"
+authors = ["Kerby Shedden <kshedden@umich.edu>"]
+version = "0.1.0"
+
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
