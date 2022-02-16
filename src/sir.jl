@@ -1,24 +1,50 @@
 using StatsBase, LinearAlgebra, Printf, Distributions
 
-"""
-    SIRResults
+abstract type AbstractSlicedInverseRegression end
 
-The result of sliced inverse regression.
 """
-struct SIRResults
+    SlicedInverseRegression
+
+A multi-index regression model fit using sliced inverse
+regression (SIR).
+"""
+struct SlicedInverseRegression <: AbstractSlicedInverseRegression
+
+    "`y`: the response variable, sorted"
+    y::Vector{Float64}
+
+    "`X`: the explanatory variables, sorted to align with `y`"
+    X::Matrix{Float64}
+
+    "`Xw`: the whitened explanatory variables"
+    Xw::Matrix{Float64}
+
+    "`sm`: the slice means (column-wise)"
+    sm::Matrix{Float64}
+
+    "`fw`: the proportion of the original data in each slice"
+    fw::Vector{Float64}
 
     "`dirs`: a basis for the estimated effective dimension reduction (EDR) space"
-    dirs::Array{Float64,2}
+    dirs::Matrix{Float64}
 
-    "`eigs`: the eigenvalues"
+    "`eigs`: the eigenvalues of the weighted covariance of slice means"
     eigs::Array{Float64}
 
     "`nslice`: the number of slices"
     nslice::Int
 
+    "`slice_assignments`: the slice indicator for each observation, aligns
+    with data supplied by user"
+    slice_assignments::Vector{Int}
+
     "`n`: the sample size"
     n::Int
 
+end
+
+function coef(r::SlicedInverseRegression)
+    return r.dirs
 end
 
 # Return the slice boundaries for approximately 'nslice' slices.
@@ -27,7 +53,7 @@ function slicer(y::AbstractVector, nslice::Integer)
     # Minimum slice size
     m = div(length(y), nslice)
 
-    bds = []
+    bds = Int[]
     i = 1 # Beginning of current slice
     while i < length(y)
         push!(bds, i)
@@ -43,10 +69,11 @@ function slicer(y::AbstractVector, nslice::Integer)
     end
 
     # If the last slice is too small, merge it with the previous one.
-    if bds[end] == length(y)
+    if bds[end] > length(y) - m / 2
         bds = bds[1:end-1]
     end
 
+    # Append a sentinel
     bds = push!(bds, length(y) + 1)
 
     return bds
@@ -56,14 +83,15 @@ end
 # blocks is nslice
 function _slice_means(
     y::AbstractVector,
-    x::Array{T,2},
+    x::Matrix{T},
     nslice::Integer,
-)::Tuple{Array{Float64,2},Array{Int64}} where {T<:AbstractFloat}
+) where {T<:AbstractFloat}
 
     n, p = size(x)
     bd = slicer(y, nslice)
     h = length(bd) - 1 # Number of slices
 
+    # Slice means and sample sizes
     sm = zeros(Float64, h, p)
     ns = zeros(Int64, h)
 
@@ -72,23 +100,24 @@ function _slice_means(
         ns[i] = bd[i+1] - bd[i]
     end
 
-    return sm, ns
+    return (sm, ns, bd)
 end
 
 # Center the columns of the array in-place
-function _center!(x::Matrix{T}) where {T<:AbstractFloat}
-    for j = 1:size(x, 2)
-        x[:, j] .-= mean(x[:, j])
+function center!(X::Matrix{T}) where {T<:AbstractFloat}
+    for j = 1:size(X, 2)
+        X[:, j] .-= mean(X[:, j])
     end
+    return X
 end
 
-# Whiten the array in-place
-function _whiten!(x::Matrix{T})::Matrix{T} where {T<:AbstractFloat}
-    n = size(x)[1]
-    c = x' * x / n
+# Whiten the array X, which has already been centered.
+function whiten(X::Matrix{T}) where {T<:AbstractFloat}
+    n = size(X, 1)
+    c = X' * X / n
     r = cholesky(c)
-    x .= x / r.U
-    return r.U
+    Xw = X / r.U
+    return tuple(Xw, r.U)
 end
 
 """
@@ -97,10 +126,10 @@ end
 Returns p-values and Chi-squared statistics for the null hypotheses
 that only the largest k eigenvalues are non-null.
 """
-function sir_test(s::SIRResults; maxdim::Int = -1)
+function sir_test(s::SlicedInverseRegression; maxdim::Int = -1)
 
     p = length(s.eigs)
-    maxdim = maxdim < 0 ? p - 1 : maxdim
+    maxdim = maxdim < 0 ? min(p - 1, s.nslice - 2) : maxdim
     cs = zeros(maxdim + 1)
     pv = zeros(maxdim + 1)
     df = zeros(Int, maxdim + 1)
@@ -111,42 +140,52 @@ function sir_test(s::SIRResults; maxdim::Int = -1)
         pv[k+1] = 1 - cdf(Chisq(df[k+1]), cs[k+1])
     end
 
-    return tuple(pv, cs, df)
+    return (Pvalues = pv, ChiSquare = cs, Degf = df)
 end
 
+# Convert the array of slice boundaries to an array of slice indicators.
+function expand_slice_bounds(bd, n)
+    z = zeros(Int, n)
+    for i = 1:length(bd)-1
+        z[bd[i]:bd[i+1]-1] .= i
+    end
+    return z
+end
 
-"""
-    sir(y, x; nslice=20, ndir=2)
-
-Use Sliced Inverse Regression (SIR) to estimate the effective dimension reduction (EDR) space.
-"""
-function sir(
+function fit(
+    ::Type{M},
     y::Vector{S},
-    x::Matrix{T};
+    X::Matrix{T};
     nslice::Integer = 20,
     ndir::Integer = 2,
-)::SIRResults where {S,T<:Real}
+)::SlicedInverseRegression where {S,T<:Real,M<:AbstractSlicedInverseRegression}
 
     # Dimensions of the problem
-    n, p = size(x)
+    n, p = size(X)
 
     # Sort the rows according to the values of y.  This also copies
-    # x and y.
+    # X and y.
     ii = sortperm(y)
-    x = x[ii, :]
+    X = X[ii, :]
     y = y[ii]
 
     # Transform to orthogonal coordinates
-    _center!(x)
-    cxu = _whiten!(x)
+    center!(X)
+    Xw, cxu = whiten(X)
 
     # Estimate E[X | Y]
-    sm, ns = _slice_means(y, x, nslice)
-    w = Array{Float64}(ns)
-    w ./= sum(w)
+    sm, ns, bd = _slice_means(y, Xw, nslice)
+    bx = expand_slice_bounds(bd, length(y))
+    fw = Array{Float64}(ns)
+    fw ./= sum(fw)
+
+    # Reorder the slice indicators so they reflect the original
+    # order of the data as supplied.
+    jj = sortperm(ii)
+    bx = bx[jj]
 
     # Get the SIR directions
-    cx = StatsBase.cov(sm, fweights(w); corrected = false)
+    cx = StatsBase.cov(sm, fweights(fw); corrected = false)
     eg = eigen(cx)
     eigs = eg.values[end:-1:1]
     dirs = eg.vectors[:, end:-1:1]
@@ -155,5 +194,14 @@ function sir(
     # Map back to the original coordinates
     dirs = cxu \ dirs
 
-    return SIRResults(dirs, eigs, nslice, n)
+    return SlicedInverseRegression(y, X, Xw, sm, fw, dirs, eigs, nslice, bx, n)
+end
+
+"""
+    sir(y, x; nslice=20, ndir=2)
+
+Use Sliced Inverse Regression (SIR) to estimate the effective dimension reduction (EDR) space.
+"""
+function sir(y, X; nslice = 20, ndir = 2)
+    return fit(SlicedInverseRegression, y, X; nslice, ndir)
 end

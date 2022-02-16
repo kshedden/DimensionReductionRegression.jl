@@ -1,5 +1,40 @@
 using Dimred, Test, Random, LinearAlgebra, Statistics
 
+function canonical_angles(A, B)
+	A, _, _ = svd(A)
+	B, _, _ = svd(B)
+	_, s, _ = svd(A' * B)
+	return acos.(s)
+end
+
+@testset "MPSIR" begin
+
+	# Sample size
+	n = 1000
+
+	# Bases for true subspaces
+	ty = [1 0 0 0 0; 0 1 0 0 0]'
+	tx = [0 1 0 0 0; 0 1 1 0 0]'
+
+	# Use these to introduce correlation into X and Y
+	rx = randn(5, 5)
+	ry = randn(5, 5)
+
+	Y = randn(n, 5) * rx
+	X = randn(n, 5) * ry
+	y1 = X * tx[:, 1] + 0.5*randn(n)
+	y2 = X * tx[:, 2] + 0.5*randn(n)
+	Y[:, 1] = y1 + y2
+	Y[:, 2] = y1 - y2
+
+	mp = MPSIR(Y, X)
+	fit!(mp, 2, 2)
+	by, bx = coef(mp)
+
+	@test maximum(abs, canonical_angles(X*bx, X*tx)) < 0.1
+	@test maximum(abs, canonical_angles(Y*by, Y*ty)) < 0.1
+end
+
 @testset "Slicer" begin
 
     y = [1, 2, 2, 3, 3, 3]
@@ -18,30 +53,45 @@ end
 
 @testset "SIR1" begin
 
-    Random.seed!(2142)
+    Random.seed!(2144)
 
-    n = 5000     # Sample size
+    n = 1000     # Sample size
     r = 0.5      # Correlation between variables
-    td = [1, -2] # True direction
+    r2 = 0.5     # R-squared
 
-    # Test with different floating point widths
-    for j = 1:4
+    # Test different population dimensions
+    for j = 1:2
 
-        # A nonlinear single-index model
+        # Explanatory variables
         x = randn(n, 2)
         x[:, 2] .= r * x[:, 1] + sqrt(1 - r^2) * x[:, 2]
-        lp = x * td
-        y = 0.1 * randn(n) + 1 ./ (1.0 .+ lp .^ 3)
 
-        xx = j < 3 ? x : Array{Float32}(x)
-        yy = rem(j, 2) == 1 ? y : Array{Float32}(y)
+        ey = if j == 1
+            # Single index model
+            lp = x[:, 2] - x[:, 1]
+            1 ./ (1 .+ (lp .+ 1) .^ 2)
+        else
+            # Two index model
+            (1 .+ x[:, 1]) .^ 1 ./ (1 .+ (1 .+ x[:, 2]) .^ 2)
+        end
 
-        rd = sir(yy, xx, nslice = 100, ndir = 1)
+		# Generate the response with the appropriate R^2.
+        ey ./= std(ey)
+        s = sqrt((1 - r2) / r2)
+        y = ey + s * randn(n)
 
-        ed = rd.dirs[:, 1]
-        @test isapprox(ed[2] / ed[1], td[2] / td[1], atol = 0.01, rtol = 0.05)
-        @test abs(rd.eigs[1] / rd.eigs[2]) > 10
-
+        rd = fit(SlicedInverseRegression, y, x; nslice = 50, ndir = 2)
+        pv = sir_test(rd)
+        @test pv.Pvalues[1] < 1e-3
+        if j == 1
+	        ed = rd.dirs[:, 1]
+	        td = [-1, 1]
+    	    @test isapprox(ed[2] / ed[1], td[2] / td[1], atol = 0.01, rtol = 0.05)
+    	    @test pv.Pvalues[2] > 0.1
+            @test abs(rd.eigs[1] / rd.eigs[2]) > 5
+    	else
+    		@test pv.Pvalues[2] < 1e-3
+    	end
     end
 end
 
@@ -101,7 +151,6 @@ end
 
     @test abs(mean(cs2) - 1) < 0.03
     @test abs(var(cs2) - 2) < 0.4
-
 end
 
 
@@ -161,5 +210,4 @@ end
 
     @test nfail1 <= 10
     @test nfail2 <= 10
-
 end

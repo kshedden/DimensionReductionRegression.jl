@@ -57,7 +57,7 @@ function phd(
     n, p = size(x)
 
     x = copy(x)
-    _center!(x)
+    center!(x)
     y = copy(y)
 
     y = _resid(y, x, method)

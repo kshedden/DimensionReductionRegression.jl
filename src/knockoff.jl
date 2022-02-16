@@ -94,6 +94,19 @@ mutable struct KnockoffResults
     """
     Stat::Matrix{Float64}
 
+    """
+    `alpha` is used to control the probability that the estimated dimension
+    exceeds the actual dimension.
+    """
+    alpha::Float64
+
+    """
+    `DimensionEstimate` is the estimated dimension, with the probability
+    that the actual dimension is greater than this value being controlled
+    at `alpha`.
+    """
+    DimensionEstimate::Integer
+
 end
 
 """
@@ -105,7 +118,7 @@ Use a knockoff approach to estimate the dimension of the effective dimension red
 `drm` is a function implementing a dimension reduction method, e.g. 
 `(y, x)->sir(y, x; nslice=10, ndim=3)`.`
 """
-function knockoff_test(y, x, drm; maxdim = 3, nrep = 1000)
+function knockoff_test(y, x, drm; alpha = 0.05, maxdim = 3, nrep = 1000)
     n, p = size(x)
     pval = zeros(nrep, maxdim)
     stat = zeros(nrep, maxdim)
@@ -114,10 +127,12 @@ function knockoff_test(y, x, drm; maxdim = 3, nrep = 1000)
 
     # Stabilization replications
     for j = 1:nrep
+
+        # Append the knockoff columns
         ii = randperm(n)
         xa[:, p+1:end] = x[ii, :]
-        ss = drm(y, xa)
 
+        ss = drm(y, xa)
         for k = 1:maxdim
             sq1 = sum(abs2, ss.dirs[1:p, k])
             sq2 = sum(abs2, ss.dirs[p+1:end, k])
@@ -127,7 +142,8 @@ function knockoff_test(y, x, drm; maxdim = 3, nrep = 1000)
         end
     end
 
+    de = pvagg_call(pval; alpha = alpha)
     pv = [pvagg(pval, j) for j = 1:maxdim]
 
-    return KnockoffResults(pv, pval, stat)
+    return KnockoffResults(pv, pval, stat, alpha, de)
 end
