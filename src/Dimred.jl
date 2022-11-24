@@ -1,14 +1,11 @@
 module Dimred
 
+import StatsAPI: fit, RegressionModel
+
 import Statistics, Random
 
-include("sir.jl")
-include("phd.jl")
-include("core.jl")
-include("knockoff.jl")
-include("mpsir.jl")
-
 export SlicedInverseRegression,
+    PrincipalHessianDirections,
     CORE,
     sir,
     phd,
@@ -16,11 +13,16 @@ export SlicedInverseRegression,
     sir_test,
     phd_test,
     slicer,
-    knockoff_test,
     eig,
     coef,
     fit,
     mpsir,
     fit!,
     MPSIR
+
+include("sir.jl")
+include("phd.jl")
+include("core.jl")
+include("mpsir.jl")
+
 end

@@ -1,10 +1,10 @@
 
 """
-    PHDResults
+    PrincipalHessianDirections
 
-The result of Principal Hession Directions.
+Fit a regression model using principal Hessian directions
 """
-struct PHDResults
+mutable struct PrincipalHessianDirections <: DimensionReductionModel
 
     "`dirs`: a basis for the estimated effective dimension reduction (EDR) space"
     dirs::Array{Float64,2}
@@ -17,10 +17,9 @@ struct PHDResults
 
     "`n`: the sample size"
     n::Int
-
 end
 
-function _resid(y::Array{S}, x::Array{S,2}, method::String) where {S<:AbstractFloat}
+function _resid(y, x, method)
 
     y = y .- mean(y)
 
@@ -46,27 +45,27 @@ end
 
 Use Principal Hessian Directions (PHD) to estimate the effective dimension reduction (EDR) space.
 """
-function phd(
-    y::Array{S},
-    x::Array{T,2};
+function fit(
+    ::Type{PrincipalHessianDirections},
+	X::AbstractMatrix,
+	y::AbstractVector;
     method::String = "y",
-    ndir::Integer = 2,
-)::PHDResults where {S,T<:AbstractFloat}
+    ndir::Integer = 2)
 
     # Dimensions of the problem
-    n, p = size(x)
+    n, p = size(X)
 
-    x = copy(x)
-    center!(x)
+    x = copy(X)
+    center!(X)
     y = copy(y)
 
-    y = _resid(y, x, method)
+    y = _resid(y, X, method)
 
     cm = zeros(Float64, p, p)
     for i = 1:n
         for j = 1:p
             for k = 1:p
-                cm[j, k] += y[i] * x[i, j] * x[i, k]
+                cm[j, k] += y[i] * X[i, j] * X[i, k]
             end
         end
     end
@@ -81,8 +80,12 @@ function phd(
     eigs = eg.values[ii]
     dirs = eg.vectors[:, ii[1:ndir]]
 
-    return PHDResults(dirs, eigs, method, length(y))
+	# Scale to unit length
+	for j in 1:size(dirs, 2)
+		dirs[:, j] ./= norm(dirs[:, j])
+	end
 
+    return PrincipalHessianDirections(dirs, eigs, method, length(y))
 end
 
 """
@@ -91,7 +94,7 @@ end
 Returns p-values and Chi-squared statistics for the null hypotheses
 that only the largest k eigenvalues are non-null.
 """
-function phd_test(s::PHDResults)
+function phd_test(s::PrincipalHessianDirections)
 
     p = length(s.eigs)
     cs = zeros(p)
@@ -108,4 +111,8 @@ function phd_test(s::PHDResults)
 
     return tuple(pv, cs, df)
 
+end
+
+function StatsBase.coef(r::PrincipalHessianDirections)
+    return r.dirs
 end

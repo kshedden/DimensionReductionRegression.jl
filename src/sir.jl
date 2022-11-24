@@ -1,95 +1,160 @@
 using StatsBase, LinearAlgebra, Printf, Distributions
 
-abstract type AbstractSlicedInverseRegression end
+abstract type DimensionReductionModel <: RegressionModel end
 
 """
-    SlicedInverseRegression
+	SlicedInverseRegression
 
 A multi-index regression model fit using sliced inverse
 regression (SIR).
 """
-struct SlicedInverseRegression <: AbstractSlicedInverseRegression
+mutable struct SlicedInverseRegression <: DimensionReductionModel
 
     "`y`: the response variable, sorted"
-    y::Vector{Float64}
+    y::AbstractVector
 
     "`X`: the explanatory variables, sorted to align with `y`"
-    X::Matrix{Float64}
+    X::AbstractMatrix
 
     "`Xw`: the whitened explanatory variables"
-    Xw::Matrix{Float64}
+    Xw::AbstractMatrix
 
-    "`sm`: the slice means (column-wise)"
-    sm::Matrix{Float64}
+    "`sm`: the slice means (each column contains one slice mean)"
+    sm::AbstractMatrix
+
+    "`cx`: the covariance of the slice means"
+    cx::AbstractMatrix
 
     "`fw`: the proportion of the original data in each slice"
-    fw::Vector{Float64}
+    fw::AbstractVector
 
     "`dirs`: a basis for the estimated effective dimension reduction (EDR) space"
-    dirs::Matrix{Float64}
+    dirs::AbstractMatrix
 
     "`eigs`: the eigenvalues of the weighted covariance of slice means"
-    eigs::Array{Float64}
+    eigs::AbstractVector
+
+    "`trans`: map data coordinates to orthogonalized coordinates"
+    trans::AbstractMatrix
 
     "`nslice`: the number of slices"
     nslice::Int
 
     "`slice_assignments`: the slice indicator for each observation, aligns
     with data supplied by user"
-    slice_assignments::Vector{Int}
+    slice_assignments::AbstractVector
 
     "`n`: the sample size"
     n::Int
-
 end
 
-function coef(r::SlicedInverseRegression)
+function SlicedInverseRegression(
+    y::AbstractVector,
+    X::AbstractMatrix,
+    nslice::Int;
+    slicer = slicer,
+)
+	@assert issorted(y)
+    @assert length(y) == size(X, 1)
+    n, p = size(X)
+
+    # Transform to orthogonal coordinates
+    center!(X)
+    Xw, trans = whiten(X)
+
+    sm = zeros(0, 0)
+    fw = zeros(0)
+    dirs = zeros(0, 0)
+    eigs = zeros(0)
+
+    # Estimate E[X | Y]
+    sm, ns, bd, nslice = slice_means(y, Xw, nslice, slicer)
+    sa = expand_slice_bounds(bd, length(y))
+    fw = Float64.(ns)
+    fw ./= sum(fw)
+
+    return SlicedInverseRegression(
+        y,
+        X,
+        Xw,
+        sm,
+        zeros(0, 0),
+        fw,
+        dirs,
+        eigs,
+        trans,
+        nslice,
+        sa,
+        n,
+    )
+end
+
+function StatsBase.coef(r::SlicedInverseRegression)
     return r.dirs
+end
+
+# Find slice bounds, placing each distinct value of y into its own slice.
+# This function assumes that y is sorted.  This matches the slice1 function
+# in the R dr package.
+function slice1(y, u)
+    bds = Int[]
+    for j in eachindex(u)
+        ii = searchsortedfirst(y, u[j])
+        push!(bds, ii)
+    end
+    push!(bds, length(y) + 1)
+    return bds
+end
+
+# The main slicing function, matches slice2 in the R dr package.
+function slice2(y, u, nslice)
+
+    myfind = function (x, v)
+        ii = findfirst(x .<= v)
+        return ifelse(isnothing(ii), length(v), ii)
+    end
+
+    # Cumulative counts of distinct values
+    bds = slice1(y, u)
+    cty = cumsum(diff(bds))
+
+    n = length(y)
+    m = floor(n / nslice) # nominal number of obs per slice
+    bds = Int[]
+    jj, j = 0, 0
+    while jj < n - 2
+        jj += m
+        j += 1
+        s = myfind(jj, cty)
+        jj = cty[s]
+        push!(bds, s)
+    end
+    return vcat(1, 1 .+ cty[bds])
 end
 
 # Return the slice boundaries for approximately 'nslice' slices.
 function slicer(y::AbstractVector, nslice::Integer)
-
-    # Minimum slice size
-    m = div(length(y), nslice)
-
-    bds = Int[]
-    i = 1 # Beginning of current slice
-    while i < length(y)
-        push!(bds, i)
-
-        # Nominal last position in slice
-        j = i + m - 1
-
-        # Scan forward to the end of a run of ties
-        while j < length(y) && y[j+1] == y[j]
-            j += 1
-        end
-        i = j + 1
+    u = sort(unique(y))
+    if length(u) > nslice
+        return slice2(y, u, nslice)
+    else
+        return slice1(y, u)
     end
-
-    # If the last slice is too small, merge it with the previous one.
-    if bds[end] > length(y) - m / 2
-        bds = bds[1:end-1]
-    end
-
-    # Append a sentinel
-    bds = push!(bds, length(y) + 1)
-
-    return bds
 end
 
 # Calculate means of blocks of consecutive rows of x.  The number of
 # blocks is nslice
-function _slice_means(
+function slice_means(
     y::AbstractVector,
-    x::Matrix{T},
+    x::AbstractMatrix,
     nslice::Integer,
-) where {T<:AbstractFloat}
-
+    slicer::Function,
+)
     n, p = size(x)
     bd = slicer(y, nslice)
-    h = length(bd) - 1 # Number of slices
+
+    # Actual number of slices, may differ from nslice
+    h = length(bd) - 1
 
     # Slice means and sample sizes
     sm = zeros(Float64, h, p)
@@ -100,7 +165,7 @@ function _slice_means(
         ns[i] = bd[i+1] - bd[i]
     end
 
-    return (sm, ns, bd)
+    return sm, ns, bd, h
 end
 
 # Center the columns of the array in-place
@@ -121,7 +186,7 @@ function whiten(X::Matrix{T}) where {T<:AbstractFloat}
 end
 
 """
-    sir_test(s)
+	sir_test(s)
 
 Returns p-values and Chi-squared statistics for the null hypotheses
 that only the largest k eigenvalues are non-null.
@@ -152,56 +217,37 @@ function expand_slice_bounds(bd, n)
     return z
 end
 
-function fit(
-    ::Type{M},
-    y::Vector{S},
-    X::Matrix{T};
-    nslice::Integer = 20,
-    ndir::Integer = 2,
-)::SlicedInverseRegression where {S,T<:Real,M<:AbstractSlicedInverseRegression}
-
-    # Dimensions of the problem
-    n, p = size(X)
-
-    # Sort the rows according to the values of y.  This also copies
-    # X and y.
-    ii = sortperm(y)
-    X = X[ii, :]
-    y = y[ii]
-
-    # Transform to orthogonal coordinates
-    center!(X)
-    Xw, cxu = whiten(X)
-
-    # Estimate E[X | Y]
-    sm, ns, bd = _slice_means(y, Xw, nslice)
-    bx = expand_slice_bounds(bd, length(y))
-    fw = Array{Float64}(ns)
-    fw ./= sum(fw)
-
-    # Reorder the slice indicators so they reflect the original
-    # order of the data as supplied.
-    jj = sortperm(ii)
-    bx = bx[jj]
+function StatsBase.fit!(si::SlicedInverseRegression; ndir::Integer = 2)
 
     # Get the SIR directions
-    cx = StatsBase.cov(sm, fweights(fw); corrected = false)
+    cx = StatsBase.cov(si.sm, fweights(si.fw); corrected = false)
     eg = eigen(cx)
-    eigs = eg.values[end:-1:1]
+    si.eigs = eg.values[end:-1:1]
     dirs = eg.vectors[:, end:-1:1]
-    dirs = dirs[:, 1:ndir]
+    si.dirs = dirs[:, 1:ndir]
+    si.cx = cx
 
     # Map back to the original coordinates
-    dirs = cxu \ dirs
+    si.dirs = si.trans \ si.dirs
 
-    return SlicedInverseRegression(y, X, Xw, sm, fw, dirs, eigs, nslice, bx, n)
+	# Scale to unit length
+	for j in 1:size(si.dirs, 2)
+		si.dirs[:, j] ./= norm(si.dirs[:, j])
+	end
 end
 
 """
-    sir(y, x; nslice=20, ndir=2)
+	sir(y, x; nslice=20, ndir=2)
 
 Use Sliced Inverse Regression (SIR) to estimate the effective dimension reduction (EDR) space.
+
+'y' must be sorted before calling 'fit'.
 """
-function sir(y, X; nslice = 20, ndir = 2)
-    return fit(SlicedInverseRegression, y, X; nslice, ndir)
+function fit(::Type{SlicedInverseRegression}, X, y; nslice = max(8, size(X, 2) + 3), ndir = 2)
+	if !issorted(y)
+		error("y must be sorted")
+	end
+    sm = SlicedInverseRegression(y, X, nslice)
+    fit!(sm; ndir = ndir)
+    return sm
 end

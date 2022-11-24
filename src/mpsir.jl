@@ -86,7 +86,13 @@ function dosir(X, Y, nslice, d)
     return u[:, 1:d], s
 end
 
-function fit!(mp::MPSIR, dx::Int, dy::Int; nslicex = 10, nslicey = 10)
+function StatsBase.fit!(
+    mp::MPSIR;
+    dx::Int = 2,
+    dy::Int = 2,
+    nslicex::Int = 10,
+    nslicey::Int = 10,
+)
 
     Xo, Yo = mp.Xo, mp.Yo
 
@@ -136,7 +142,7 @@ function fit!(mp::MPSIR, dx::Int, dy::Int; nslicex = 10, nslicey = 10)
     mp.eigy = eigy
 end
 
-function coef(mp::MPSIR)
+function StatsBase.coef(mp::MPSIR)
     return (mp.By, mp.Bx)
 end
 
