@@ -90,7 +90,7 @@ end
 		nslice = 50
 		si = SlicedInverseRegression(y, x, nslice)
 		fit!(si; ndir = 2)
-		pv = sir_test(si)
+		pv = dimension_test(si)
 		@test pv.Pvalues[1] < 1e-3
 		if j == 1
 			ed = si.dirs[:, 1]
@@ -150,7 +150,7 @@ end
 
 		ph = fit(PrincipalHessianDirections, X, y; ndir = 1)
 
-		pv, cs, df = phd_test(ph)
+		pv, cs, df = dimension_test(ph)
 		push!(cs2, cs[2])
 		push!(df2, df[2])
 	end

@@ -67,9 +67,17 @@ function SlicedInverseRegression(
     dirs = zeros(0, 0)
     eigs = zeros(0)
 
+    bd = slicer(y, nslice)
+
+    # Actual number of slices, may differ from nslice
+    h = length(bd) - 1
+
     # Estimate E[X | Y]
-    sm, ns, bd, nslice = slice_means(y, Xw, nslice, slicer)
+    sm = slice_means(y, Xw, bd)
     sa = expand_slice_bounds(bd, length(y))
+
+	# Slice frequencies
+	ns = diff(bd)
     fw = Float64.(ns)
     fw ./= sum(fw)
 
@@ -83,13 +91,13 @@ function SlicedInverseRegression(
         dirs,
         eigs,
         trans,
-        nslice,
+        h,
         sa,
         n,
     )
 end
 
-function StatsBase.coef(r::SlicedInverseRegression)
+function coef(r::SlicedInverseRegression)
     return r.dirs
 end
 
@@ -144,28 +152,19 @@ end
 
 # Calculate means of blocks of consecutive rows of x.  The number of
 # blocks is nslice
-function slice_means(
-    y::AbstractVector,
-    x::AbstractMatrix,
-    nslice::Integer,
-    slicer::Function,
-)
-    n, p = size(x)
-    bd = slicer(y, nslice)
+function slice_means(y::AbstractVector, X::AbstractMatrix, bd::AbstractVector)
 
-    # Actual number of slices, may differ from nslice
-    h = length(bd) - 1
+    n, p = size(X)
+	h = length(bd) - 1
 
     # Slice means and sample sizes
     sm = zeros(Float64, h, p)
-    ns = zeros(Int64, h)
 
     for i = 1:h
-        sm[i, :] = mean(x[bd[i]:bd[i+1]-1, :], dims = 1)
-        ns[i] = bd[i+1] - bd[i]
+        sm[i, :] = mean(X[bd[i]:bd[i+1]-1, :], dims = 1)
     end
 
-    return sm, ns, bd, h
+    return sm
 end
 
 # Center the columns of the array in-place
@@ -191,7 +190,7 @@ end
 Returns p-values and Chi-squared statistics for the null hypotheses
 that only the largest k eigenvalues are non-null.
 """
-function sir_test(s::SlicedInverseRegression; maxdim::Int = -1)
+function dimension_test(s::SlicedInverseRegression; maxdim::Int = -1)
 
     p = length(s.eigs)
     maxdim = maxdim < 0 ? min(p - 1, s.nslice - 2) : maxdim
@@ -217,7 +216,7 @@ function expand_slice_bounds(bd, n)
     return z
 end
 
-function StatsBase.fit!(si::SlicedInverseRegression; ndir::Integer = 2)
+function fit!(si::SlicedInverseRegression; ndir::Integer = 2)
 
     # Get the SIR directions
     cx = StatsBase.cov(si.sm, fweights(si.fw); corrected = false)

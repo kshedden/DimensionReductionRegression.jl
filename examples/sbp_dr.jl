@@ -45,10 +45,16 @@ xx = xx[ii, :]
 ms = fit(SlicedInverseRegression, xx, yy)
 
 # Use chi^2 tests for the dimension
-pvs = sir_test(ms)
+pvs = dimension_test(ms)
 
 # Fit a model using principal Hessian directions
 mp = fit(PrincipalHessianDirections, xx, yy)
 
 # Use chi^2 tests for the dimension
-pvp = phd_test(mp)
+pvp = dimension_test(mp)
+
+# Fit a model using sliced average variance estimation
+ma = fit(SlicedAverageVarianceEstimation, xx, yy)
+
+# Use chi^2 tests for the dimension
+#pvp = phd_test(mp)

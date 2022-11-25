@@ -89,12 +89,12 @@ function fit(
 end
 
 """
-    phd_test(s)
+    dimension_test(s)
 
 Returns p-values and Chi-squared statistics for the null hypotheses
 that only the largest k eigenvalues are non-null.
 """
-function phd_test(s::PrincipalHessianDirections)
+function dimension_test(s::PrincipalHessianDirections)
 
     p = length(s.eigs)
     cs = zeros(p)
@@ -102,17 +102,14 @@ function phd_test(s::PrincipalHessianDirections)
     df = zeros(Int, p)
 
     for k = 0:p-1
-
         cs[k+1] = s.n * sum(abs2, s.eigs[k+1:end]) / 2
         df[k+1] = div((p - k + 1) * (p - k), 2)
         pv[k+1] = 1 - cdf(Chisq(df[k+1]), cs[k+1])
-
     end
 
     return tuple(pv, cs, df)
-
 end
 
-function StatsBase.coef(r::PrincipalHessianDirections)
+function coef(r::PrincipalHessianDirections)
     return r.dirs
 end

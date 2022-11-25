@@ -30,4 +30,10 @@ mp = dr(BPXSY1 ~ RIAGENDRx + RIDAGEYR + BMXWT + BMXHT + BMXBMI + BMXLEG + BMXARM
 # Use chi^2 tests for the dimension
 print(dr.test(mp))
 
+# Fit a model using sliced average variance estimation
+ma = dr(BPXSY1 ~ RIAGENDRx + RIDAGEYR + BMXWT + BMXHT + BMXBMI + BMXLEG + BMXARML + BMXARMC + BMXWAIST + BMXHIP, dx, method="save")
+
+# Use chi^2 tests for the dimension
+#print(dr.test(mp))
+
 
