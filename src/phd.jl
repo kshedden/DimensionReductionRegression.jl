@@ -55,8 +55,7 @@ function fit(
     # Dimensions of the problem
     n, p = size(X)
 
-    x = copy(X)
-    center!(X)
+    X = center(X)
     y = copy(y)
 
     y = _resid(y, X, method)
@@ -71,7 +70,7 @@ function fit(
     end
     cm /= n
 
-    cx = StatsBase.cov(x)
+    cx = StatsBase.cov(X)
     cb = cx \ cm
 
     eg = eigen(cb)
@@ -107,7 +106,7 @@ function dimension_test(s::PrincipalHessianDirections)
         pv[k+1] = 1 - cdf(Chisq(df[k+1]), cs[k+1])
     end
 
-    return tuple(pv, cs, df)
+    return (Pvals=pv, Stat=cs, DF=df)
 end
 
 function coef(r::PrincipalHessianDirections)

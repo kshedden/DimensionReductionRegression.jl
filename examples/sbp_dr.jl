@@ -18,9 +18,10 @@ v = [
 ]
 dx = df[:, v]
 dx = dx[completecases(dx), :]
+disallowmissing!(dx)
 
 # Recode the sex variable to numeric
-dx[!, :RIAGENDRx] = replace(dx[:, :RIAGENDR], "F" => 1, "M" => -1)
+dx[!, :RIAGENDRx] = Float64.(replace(dx[:, :RIAGENDR], "F" => 1, "M" => -1))
 v = replace(v, :RIAGENDR => :RIAGENDRx)
 dx = dx[:, v]
 
@@ -54,7 +55,7 @@ mp = fit(PrincipalHessianDirections, xx, yy)
 pvp = dimension_test(mp)
 
 # Fit a model using sliced average variance estimation
-ma = fit(SlicedAverageVarianceEstimation, xx, yy)
+ma = fit(SlicedAverageVarianceEstimation, xx, yy; ndir=5)
 
 # Use chi^2 tests for the dimension
-#pvp = phd_test(mp)
+pva = dimension_test(ma)

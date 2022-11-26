@@ -16,14 +16,23 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
     "`Xw`: the whitened explanatory variables"
     Xw::AbstractMatrix
 
+    "`nslice`: the number of slices"
+    nslice::Int
+
     "`M`: the save kernel matrix"
 	M::AbstractMatrix
+
+	"`A`: the within-slice covariance matrices"
+	A::Vector{AbstractMatrix}
 
     "`fw`: the proportion of the original data in each slice"
     fw::AbstractVector
 
     "`dirs`: a basis for the estimated effective dimension reduction (EDR) space"
     dirs::AbstractMatrix
+
+    "`eigv`: the eigenvectors of the weighted covariance of slice means"
+    eigv::AbstractMatrix
 
     "`eigs`: the eigenvalues of the weighted covariance of slice means"
     eigs::AbstractVector
@@ -43,25 +52,29 @@ function SlicedAverageVarianceEstimation(
     n, p = size(X)
 
     # Transform to orthogonal coordinates
-    center!(X)
+    y = copy(y)
+    X = center(X)
     Xw, trans = whiten(X)
 
     bd = slicer(y, nslice)
+	nslice = length(bd) - 1
 
+	# Storage to be filled in during fit.
     dirs = zeros(0, 0)
     eigs = zeros(0)
+    eigv = zeros(0, 0)
 
 	# Slice frequencies
 	ns = diff(bd)
     fw = Float64.(ns)
     fw ./= sum(fw)
 
-	M = save_kernel(y, Xw, bd, fw)
+	A, M = save_kernel(y, Xw, bd, fw)
 
     # Actual number of slices, may differ from nslice
     h = length(bd) - 1
 
-	return SlicedAverageVarianceEstimation(y, X, Xw, M, fw, dirs, eigs, trans)
+	return SlicedAverageVarianceEstimation(y, X, Xw, nslice, M, A, fw, dirs, eigv, eigs, trans)
 end
 
 function save_kernel(y::AbstractVector, X::AbstractMatrix, bd::AbstractVector, fw::AbstractVector)
@@ -69,23 +82,32 @@ function save_kernel(y::AbstractVector, X::AbstractMatrix, bd::AbstractVector, f
     n, p = size(X)
     h = length(bd) - 1
 
+	# Number of observations per slice
+	nw = n * fw
+
+	A = Vector{AbstractMatrix}()
     M = zeros(p, p)
-	c = zeros(p, p)
     for i = 1:h
-        c .= I(p) - cov(X[bd[i]:bd[i+1]-1, :])
-        M .+= fw[i] * c * c
+        c = I(p) - cov(X[bd[i]:bd[i+1]-1, :], corrected=false)
+        push!(A, sqrt(nw[i]) * c)
+        M .+= nw[i] * c * c
     end
 
-    return M
+	M ./= n
+	for j in eachindex(A)
+		A[j] ./= sqrt(n)
+	end
+
+    return A, M
 end
 
 function fit!(save::SlicedAverageVarianceEstimation; ndir=2)
 
-	eg = eigen(save.M)
+	eg = eigen(Symmetric(save.M))
 
     save.eigs = eg.values[end:-1:1]
-    dirs = eg.vectors[:, end:-1:1]
-    save.dirs = dirs[:, 1:ndir]
+    save.eigv = eg.vectors[:, end:-1:1]#[:, 1:ndir]
+    save.dirs = eg.vectors[:, end:-1:1][:, 1:ndir]
 
     # Map back to the original coordinates
     save.dirs = save.trans \ save.dirs
@@ -114,4 +136,63 @@ end
 
 function coef(r::SlicedAverageVarianceEstimation)
     return r.dirs
+end
+
+function dimension_test(save::SlicedAverageVarianceEstimation)
+
+	(; X, A, dirs, eigs, eigv) = save
+	ndirs = size(dirs, 2)
+	h = save.nslice
+	p = length(eigs)
+	n = length(save.y)
+
+	# Test statistic based on normal and general theory
+	nstat = zeros(ndirs)
+	gstat = zeros(ndirs)
+
+	# Degrees of freedom based on normal and general theory
+	ndf = zeros(ndirs)
+	gdf = zeros(ndirs)
+
+	# P-values based on normal and general theory
+	npv = zeros(ndirs)
+	gpv = zeros(ndirs)
+
+    qrx = qr(X)
+	Z = sqrt(n) * Matrix(qrx.Q)
+
+	# We need to resolve the sign ambiguity here.
+	R = qrx.R
+	for i in 1:size(R, 1)
+		if R[i, i] < 0
+			Z[:, i] *= -1
+		end
+	end
+
+	for i in 0:ndirs-1
+
+		E = eigv[:, i+1:end]
+		H = Z * E
+		ZH = zeros(n, (p-i)*(p-i))
+
+		# Normal theory test statistics
+		for j in 1:h
+			nstat[i+1] += sum((E' * A[j] * E) .^ 2) * n / 2
+		end
+
+		# Normal theory degrees of freedom and p-value
+		ndf[i + 1] = (h - 1) * (p - i) * (p - i + 1) / 2
+		npv[i + 1] = 1 - cdf(Chisq(ndf[i+1]), nstat[i+1])
+
+		# General theory test
+		for j in 1:n
+			ZH[j, :] = vec(H[j, :] * H[j, :]')
+		end
+		S = cov(ZH) / 2
+        gdf[i + 1] = (h - 1) * sum(diag(S))^2 / sum(S.^2)
+        gstat[i + 1] = nstat[i + 1] * sum(diag(S)) / sum(S.^2)
+        gpv[i + 1] = 1 - cdf(Chisq(gdf[i + 1]), gstat[i + 1])
+	end
+
+    return (NormalPvals = npv, NormalStat = nstat, NormalDF = ndf, GeneralPvals = gpv, GeneralStat = gstat, GeneralDF = gdf)
 end

@@ -59,7 +59,8 @@ function SlicedInverseRegression(
     n, p = size(X)
 
     # Transform to orthogonal coordinates
-    center!(X)
+	y = copy(y)
+    X = center(X)
     Xw, trans = whiten(X)
 
     sm = zeros(0, 0)
@@ -167,8 +168,9 @@ function slice_means(y::AbstractVector, X::AbstractMatrix, bd::AbstractVector)
     return sm
 end
 
-# Center the columns of the array in-place
-function center!(X::Matrix{T}) where {T<:AbstractFloat}
+# Center the columns of the matrix X.
+function center(X)
+	X = copy(X)
     for j = 1:size(X, 2)
         X[:, j] .-= mean(X[:, j])
     end
@@ -176,7 +178,7 @@ function center!(X::Matrix{T}) where {T<:AbstractFloat}
 end
 
 # Whiten the array X, which has already been centered.
-function whiten(X::Matrix{T}) where {T<:AbstractFloat}
+function whiten(X)
     n = size(X, 1)
     c = X' * X / n
     r = cholesky(c)

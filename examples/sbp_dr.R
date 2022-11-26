@@ -1,7 +1,8 @@
 library(dplyr)
 library(ggplot2)
 library(readr)
-library(dr)
+#library(dr)
+source("../test/dr/R/dr.R")
 source("read.R")
 
 # Reduce to complete cases
@@ -34,6 +35,4 @@ print(dr.test(mp))
 ma = dr(BPXSY1 ~ RIAGENDRx + RIDAGEYR + BMXWT + BMXHT + BMXBMI + BMXLEG + BMXARML + BMXARMC + BMXWAIST + BMXHIP, dx, method="save")
 
 # Use chi^2 tests for the dimension
-#print(dr.test(mp))
-
-
+print(dr.test(ma))
