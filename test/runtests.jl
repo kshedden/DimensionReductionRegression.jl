@@ -1,9 +1,18 @@
-using Dimred, Test, Random, LinearAlgebra, Statistics, StatsBase
+using Dimred
+using Test
+using Random
+using LinearAlgebra
+using Statistics
+using StatsBase
+using RCall
+using StableRNGs
 
 function canonical_angles(A, B)
 	A, _, _ = svd(A)
 	B, _, _ = svd(B)
 	_, s, _ = svd(A' * B)
+	@assert maximum(abs, s) < 1 + 1e-10
+	s = clamp.(s, -1, 1)
 	return acos.(s)
 end
 
@@ -54,6 +63,59 @@ end
 	@test maximum(abs, canonical_angles(Y * by, Y * ty)) < 0.1
 end
 
+function gendat(n, p, rng)
+
+	X = randn(rng, n, p)
+	for j in 1:p
+		X[:, j] .-= mean(X[:, j])
+	end
+    y = X[:, 1] - X[:, 2] + 0.5*randn(rng, n)
+	ii = sortperm(y)
+	X = X[ii, :]
+	y = y[ii]
+
+	return X, y
+end
+
+@testset "SIR1-R" begin
+
+	n = 200
+	p = 5
+	ndir = 3
+	rng = StableRNG(123)
+
+	X, y = gendat(n, p, rng)
+ 
+    @rput X
+    @rput y
+
+    R"
+    library(dr)
+    r = dr.compute(X, y, array(1, length(y)))
+    tst = dr.test(r)
+    "
+
+    @rget r
+	@rget tst
+    evectors = r[:evectors][:, 1:ndir]
+
+	m = fit(SlicedInverseRegression, X, y; ndir=ndir)
+	mt = dimension_test(m)
+
+	# Check that the dimension inference is the same.
+	@test isapprox(mt.Pvals[1:4], tst[1:4, :p_value])
+	@test isapprox(mt.Stat[1:4], tst[1:4, :Stat])
+	@test isapprox(mt.Degf[1:4], tst[1:4, :df])
+
+	@test all(size(evectors) .== size(coef(m)))
+
+	# Check that the estimated SDR subspaces are identical.
+	yr = X * evectors
+	ym = X * coef(m)
+	ang = canonical_angles(yr, ym)
+	@test maximum(abs, ang) .< 1e-6
+end
+
 @testset "SIR1" begin
 
 	Random.seed!(2144)
@@ -91,17 +153,105 @@ end
 		si = SlicedInverseRegression(y, x, nslice)
 		fit!(si; ndir = 2)
 		pv = dimension_test(si)
-		@test pv.Pvalues[1] < 1e-3
+		@test pv.Pvals[1] < 1e-3
 		if j == 1
 			ed = si.dirs[:, 1]
 			td = [-1, 1]
 			@test isapprox(ed[2] / ed[1], td[2] / td[1], atol = 0.01, rtol = 0.05)
-			@test pv.Pvalues[2] > 0.1
+			@test pv.Pvals[2] > 0.1
 			@test abs(si.eigs[1] / si.eigs[2]) > 5
 		else
-			@test pv.Pvalues[2] < 0.005
+			@test pv.Pvals[2] < 0.005
 		end
 	end
+end
+
+@testset "PHDy-R" begin
+
+	n = 200
+	p = 5
+	ndir = 3
+	rng = StableRNG(123)
+
+	X, y = gendat(n, p, rng)
+ 
+    @rput X
+    @rput y
+
+    R"
+    library(dr)
+    r = dr.compute(X, y, array(1, length(y)), method='phdy')
+    tst = dr.test(r, numdir=5)
+	M = r$M
+    "
+
+    @rget r
+	@rget tst
+	@rget M
+    evectors = r[:evectors][:, 1:ndir]
+
+	m = fit(PrincipalHessianDirections, X, y; ndir=ndir, method="y")
+	mt = dimension_test(m)
+
+	# Compare the kernel matrices
+	@test isapprox(M, m.M)
+
+	# Check that the dimension inference is the same.
+	@test isapprox(mt.Pvals[1:4], tst[1:4, :p_value])
+	@test isapprox(mt.Stat[1:4], tst[1:4, :Stat])
+	@test isapprox(mt.Degf[1:4], tst[1:4, :df])
+
+	@test all(size(evectors) .== size(coef(m)))
+
+	# Check that the estimated SDR subspaces are identical.
+	yr = X * evectors
+	ym = X * coef(m)
+	ang = canonical_angles(yr, ym)
+	@test maximum(abs, ang) .< 1e-6
+end
+
+@testset "PHDres-R" begin
+
+	n = 200
+	p = 5
+	ndir = 3
+	rng = StableRNG(123)
+
+	X, y = gendat(n, p, rng)
+ 
+    @rput X
+    @rput y
+
+    R"
+    library(dr)
+    r = dr.compute(X, y, array(1, length(y)), method='phdres')
+    tst = dr.test(r, numdir=5)
+	M = r$M
+    "
+
+    @rget r
+	@rget tst
+	@rget M
+    evectors = r[:evectors][:, 1:ndir]
+
+	m = fit(PrincipalHessianDirections, X, y; ndir=ndir, method="r")
+	mt = dimension_test(m)
+
+	# Compare the kernel matrices
+	@test isapprox(M, m.M)
+
+	# Check that the dimension inference is the same.
+	@test isapprox(mt.Pvals[1:4], tst[1:4, "Normal theory"])
+	@test isapprox(mt.Stat[1:4], tst[1:4, :Stat])
+	@test isapprox(mt.Degf[1:4], tst[1:4, :df])
+
+	@test all(size(evectors) .== size(coef(m)))
+
+	# Check that the estimated SDR subspaces are identical.
+	yr = X * evectors
+	ym = X * coef(m)
+	ang = canonical_angles(yr, ym)
+	@test maximum(abs, ang) .< 1e-6
 end
 
 @testset "Check PHD estimates" begin
@@ -130,6 +280,52 @@ end
 		@test isapprox(ed[2] / ed[1], td[2] / td[1], atol = 0.01, rtol = 0.05)
 		@test abs(rd.eigs[1] / rd.eigs[2]) > 10
 	end
+end
+
+@testset "SAVE-R" begin
+
+	n = 200
+	p = 5
+	ndir = 4
+	rng = StableRNG(123)
+
+	X, y = gendat(n, p, rng)
+ 
+    @rput X
+    @rput y
+	@rput ndir
+
+    R"
+    library(dr)
+    r = dr.compute(X, y, array(1, length(y)), method='save')
+    tst = dr.test(r, numdir=ndir)
+	M = r$M
+    "
+
+    @rget r
+	@rget tst
+	@rget M
+    evectors = r[:evectors][:, 1:ndir]
+
+	m = fit(SlicedAverageVarianceEstimation, X, y; ndir=ndir)
+	mt = dimension_test(m)
+
+	# Compare the kernel matrices
+	@test isapprox(M, m.M)
+
+	# Check that the dimension inference is the same.
+	@test isapprox(mt.NormalPvals[1:4], tst[1:4, "p_value(Nor)"])
+	@test isapprox(mt.GeneralPvals[1:4], tst[1:4, "p_value(Gen)"])
+	@test isapprox(mt.NormalStat[1:4], tst[1:4, :Stat])
+	@test isapprox(mt.NormalDegf[1:4], tst[1:4, "df(Nor)"])
+
+	@test all(size(evectors) .== size(coef(m)))
+
+	# Check that the estimated SDR subspaces are identical.
+	yr = X * evectors
+	ym = X * coef(m)
+	ang = canonical_angles(yr, ym)
+	@test maximum(abs, ang) .< 1e-6
 end
 
 @testset "Check PHD tests" begin

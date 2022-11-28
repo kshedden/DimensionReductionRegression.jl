@@ -6,11 +6,20 @@ Fit a regression model using principal Hessian directions
 """
 mutable struct PrincipalHessianDirections <: DimensionReductionModel
 
+    "`y`: the response variable, sorted"
+    y::AbstractVector
+
+    "`X`: the explanatory variables, sorted to align with `y`"
+    X::AbstractMatrix
+
+    "`M`: the kernel matrix"
+    M::AbstractMatrix
+
     "`dirs`: a basis for the estimated effective dimension reduction (EDR) space"
-    dirs::Array{Float64,2}
+    dirs::AbstractMatrix
 
     "`eigs`: the eigenvalues"
-    eigs::Array{Float64}
+    eigs::AbstractVector
 
     "`method`: one of 'y', 'r', or 'q'."
     method::String
@@ -19,72 +28,68 @@ mutable struct PrincipalHessianDirections <: DimensionReductionModel
     n::Int
 end
 
-function _resid(y, x, method)
+function _resid(y, X, method)
 
     y = y .- mean(y)
 
     if method == "y"
-        y .= y ./ std(y)
         return y
     elseif method == "r"
-        q, _ = qr(x)
-        y .= y - q * (q' * y)
-        y .= y / std(y)
+        qrx = qr(X)
+        q = Matrix(qrx.Q)
+        y .-= q * (q' * y)
         return y
     elseif method == "q"
         error("q-method PHD is not implemented yet")
     end
 
     return y
-
 end
 
 
 """
-    phd(y, x; ndir=2)
+    fit(PrincipalHessianDirections, X, y; method="y", ndir=2)
 
 Use Principal Hessian Directions (PHD) to estimate the effective dimension reduction (EDR) space.
 """
 function fit(
     ::Type{PrincipalHessianDirections},
-	X::AbstractMatrix,
-	y::AbstractVector;
+    X::AbstractMatrix,
+    y::AbstractVector;
     method::String = "y",
-    ndir::Integer = 2)
+    ndir::Integer = 2,
+)
+
+    if !(method in ["y", "r", "q"])
+        error("Method must be one of 'y', 'r', or 'q'")
+    end
 
     # Dimensions of the problem
     n, p = size(X)
 
     X = center(X)
-    y = copy(y)
+    Xw, trans = whiten(X)
 
+    y = copy(y)
     y = _resid(y, X, method)
 
-    cm = zeros(Float64, p, p)
-    for i = 1:n
-        for j = 1:p
-            for k = 1:p
-                cm[j, k] += y[i] * X[i, j] * X[i, k]
-            end
-        end
-    end
-    cm /= n
+    M = Xw' * Diagonal(y) * Xw
+    M ./= n
 
-    cx = StatsBase.cov(X)
-    cb = cx \ cm
-
-    eg = eigen(cb)
-
+    eg = eigen(M)
     ii = sortperm(-abs.(eg.values))
     eigs = eg.values[ii]
     dirs = eg.vectors[:, ii[1:ndir]]
 
-	# Scale to unit length
-	for j in 1:size(dirs, 2)
-		dirs[:, j] ./= norm(dirs[:, j])
-	end
+    # Map back to the original coordinates
+    dirs = trans \ dirs
 
-    return PrincipalHessianDirections(dirs, eigs, method, length(y))
+    # Scale to unit length
+    for j = 1:size(dirs, 2)
+        dirs[:, j] ./= norm(dirs[:, j])
+    end
+
+    return PrincipalHessianDirections(y, X, M, dirs, eigs, method, length(y))
 end
 
 """
@@ -96,17 +101,18 @@ that only the largest k eigenvalues are non-null.
 function dimension_test(s::PrincipalHessianDirections)
 
     p = length(s.eigs)
-    cs = zeros(p)
+    stat = zeros(p)
     pv = zeros(p)
     df = zeros(Int, p)
+    vy = var(s.y)
 
     for k = 0:p-1
-        cs[k+1] = s.n * sum(abs2, s.eigs[k+1:end]) / 2
+        stat[k+1] = s.n * (p - k) * mean(abs2, s.eigs[k+1:end]) / (2 * vy)
         df[k+1] = div((p - k + 1) * (p - k), 2)
-        pv[k+1] = 1 - cdf(Chisq(df[k+1]), cs[k+1])
+        pv[k+1] = 1 - cdf(Chisq(df[k+1]), stat[k+1])
     end
 
-    return (Pvals=pv, Stat=cs, DF=df)
+    return (Pvals = pv, Stat = stat, Degf = df)
 end
 
 function coef(r::PrincipalHessianDirections)

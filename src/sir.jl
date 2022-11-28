@@ -54,12 +54,12 @@ function SlicedInverseRegression(
     nslice::Int;
     slicer = slicer,
 )
-	@assert issorted(y)
+    @assert issorted(y)
     @assert length(y) == size(X, 1)
     n, p = size(X)
 
     # Transform to orthogonal coordinates
-	y = copy(y)
+    y = copy(y)
     X = center(X)
     Xw, trans = whiten(X)
 
@@ -77,8 +77,8 @@ function SlicedInverseRegression(
     sm = slice_means(y, Xw, bd)
     sa = expand_slice_bounds(bd, length(y))
 
-	# Slice frequencies
-	ns = diff(bd)
+    # Slice frequencies
+    ns = diff(bd)
     fw = Float64.(ns)
     fw ./= sum(fw)
 
@@ -156,7 +156,7 @@ end
 function slice_means(y::AbstractVector, X::AbstractMatrix, bd::AbstractVector)
 
     n, p = size(X)
-	h = length(bd) - 1
+    h = length(bd) - 1
 
     # Slice means and sample sizes
     sm = zeros(Float64, h, p)
@@ -170,7 +170,7 @@ end
 
 # Center the columns of the matrix X.
 function center(X)
-	X = copy(X)
+    X = copy(X)
     for j = 1:size(X, 2)
         X[:, j] .-= mean(X[:, j])
     end
@@ -179,11 +179,13 @@ end
 
 # Whiten the array X, which has already been centered.
 function whiten(X)
+    qrx = qr(X)
+    W, T = Matrix(qrx.Q), Matrix(qrx.R)
     n = size(X, 1)
-    c = X' * X / n
-    r = cholesky(c)
-    Xw = X / r.U
-    return tuple(Xw, r.U)
+    k = sqrt(n)
+    W *= k
+    T /= k
+    return (W, T)
 end
 
 """
@@ -206,7 +208,7 @@ function dimension_test(s::SlicedInverseRegression; maxdim::Int = -1)
         pv[k+1] = 1 - cdf(Chisq(df[k+1]), cs[k+1])
     end
 
-    return (Pvalues = pv, ChiSquare = cs, Degf = df)
+    return (Pvals = pv, Stat = cs, Degf = df)
 end
 
 # Convert the array of slice boundaries to an array of slice indicators.
@@ -231,10 +233,10 @@ function fit!(si::SlicedInverseRegression; ndir::Integer = 2)
     # Map back to the original coordinates
     si.dirs = si.trans \ si.dirs
 
-	# Scale to unit length
-	for j in 1:size(si.dirs, 2)
-		si.dirs[:, j] ./= norm(si.dirs[:, j])
-	end
+    # Scale to unit length
+    for j = 1:size(si.dirs, 2)
+        si.dirs[:, j] ./= norm(si.dirs[:, j])
+    end
 end
 
 """
@@ -244,10 +246,16 @@ Use Sliced Inverse Regression (SIR) to estimate the effective dimension reductio
 
 'y' must be sorted before calling 'fit'.
 """
-function fit(::Type{SlicedInverseRegression}, X, y; nslice = max(8, size(X, 2) + 3), ndir = 2)
-	if !issorted(y)
-		error("y must be sorted")
-	end
+function fit(
+    ::Type{SlicedInverseRegression},
+    X,
+    y;
+    nslice = max(8, size(X, 2) + 3),
+    ndir = 2,
+)
+    if !issorted(y)
+        error("y must be sorted")
+    end
     sm = SlicedInverseRegression(y, X, nslice)
     fit!(sm; ndir = ndir)
     return sm
