@@ -89,18 +89,27 @@ end
     @rput X
     @rput y
 
+	hyp = randn(p, 2)
+	@rput hyp
+
     R"
     library(dr)
     r = dr.compute(X, y, array(1, length(y)))
     tst = dr.test(r)
+	M = r$M
     "
 
     @rget r
 	@rget tst
+	@rget M
     evectors = r[:evectors][:, 1:ndir]
 
 	m = fit(SlicedInverseRegression, X, y; ndir=ndir)
 	mt = dimension_test(m)
+
+	# Check the kernel matrix
+	@test isapprox(eigen(m.M).values, eigen(M).values)
+	@test isapprox(m.M, m.M')
 
 	# Check that the dimension inference is the same.
 	@test isapprox(mt.Pvals[1:4], tst[1:4, :p_value])
@@ -194,7 +203,8 @@ end
 	mt = dimension_test(m)
 
 	# Compare the kernel matrices
-	@test isapprox(M, m.M)
+	@test isapprox(eigen(M).values, eigen(m.M).values)
+	@test isapprox(m.M, m.M')
 
 	# Check that the dimension inference is the same.
 	@test isapprox(mt.Pvals[1:4], tst[1:4, :p_value])
@@ -238,7 +248,8 @@ end
 	mt = dimension_test(m)
 
 	# Compare the kernel matrices
-	@test isapprox(M, m.M)
+	@test isapprox(eigen(M).values, eigen(m.M).values)
+	@test isapprox(m.M, m.M')
 
 	# Check that the dimension inference is the same.
 	@test isapprox(mt.Pvals[1:4], tst[1:4, "Normal theory"])
@@ -311,7 +322,8 @@ end
 	mt = dimension_test(m)
 
 	# Compare the kernel matrices
-	@test isapprox(M, m.M)
+	@test isapprox(eigen(M).values, eigen(m.M).values)
+	@test isapprox(M, M')
 
 	# Check that the dimension inference is the same.
 	@test isapprox(mt.NormalPvals[1:4], tst[1:4, "p_value(Nor)"])
