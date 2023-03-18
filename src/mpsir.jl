@@ -41,8 +41,8 @@ function MPSIR(Y::AbstractMatrix, X::AbstractMatrix)
 
     @assert size(X, 1) == size(Y, 1)
 
-    Y = center(Y)
-    X = center(X)
+    Y, _ = center(Y)
+    X, _ = center(X)
 
     # Transform Y to orthogonality
     Yo, s, v = svd(Y)

@@ -1,6 +1,8 @@
 module Dimred
 
-import StatsAPI: fit, fit!, coef, RegressionModel
+using Distributions: cdf, Beta
+
+import StatsAPI: fit, fit!, coef, response, RegressionModel
 
 import Statistics, Random
 
@@ -18,12 +20,14 @@ export SlicedInverseRegression,
     fit,
     mpsir,
     fit!,
-    coef
+    coef,
+    response
 
 include("sir.jl")
 include("phd.jl")
 include("save.jl")
 include("core.jl")
 include("mpsir.jl")
+include("diva.jl")
 
 end

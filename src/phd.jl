@@ -12,6 +12,9 @@ mutable struct PrincipalHessianDirections <: DimensionReductionModel
     "`X`: the explanatory variables, sorted to align with `y`"
     X::AbstractMatrix
 
+	"`Xmean`: the means of the columns of X"
+	Xmean::AbstractVector
+
     "`M`: the kernel matrix"
     M::AbstractMatrix
 
@@ -67,7 +70,7 @@ function fit(
     # Dimensions of the problem
     n, p = size(X)
 
-    X = center(X)
+    X, mn = center(X)
     Xw, trans = whiten(X)
 
     y = copy(y)
@@ -89,7 +92,7 @@ function fit(
         dirs[:, j] ./= norm(dirs[:, j])
     end
 
-    return PrincipalHessianDirections(y, X, M, dirs, eigs, method, length(y))
+    return PrincipalHessianDirections(y, X, mn, M, dirs, eigs, method, length(y))
 end
 
 """
