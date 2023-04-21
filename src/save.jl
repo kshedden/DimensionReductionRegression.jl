@@ -13,11 +13,11 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
     "`X`: the explanatory variables, sorted to align with `y`"
     X::AbstractMatrix
 
-	"`Xmean`: the means of the columns of X"
-	Xmean::AbstractVector
-
     "`Xw`: the whitened explanatory variables"
     Xw::AbstractMatrix
+
+	"`Xmean`: the means of the columns of X"
+	Xmean::AbstractVector
 
     "`nslice`: the number of slices"
     nslice::Int
@@ -48,6 +48,26 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
     "`slice_assignments`: the slice indicator for each observation, aligns
     with data supplied by user"
     slice_assignments::AbstractVector
+end
+
+function whitened_predictors(m::SlicedAverageVarianceEstimation)
+    return m.Xw
+end
+
+function modelmatrix(m::SlicedAverageVarianceEstimation)
+    return m.X
+end
+
+function nobs(m::SlicedAverageVarianceEstimation)
+    return length(m.y)
+end
+
+function nvar(m::SlicedAverageVarianceEstimation)
+    return size(m.X, 2)
+end
+
+function response(m::SlicedAverageVarianceEstimation)
+    return m.y
 end
 
 function SlicedAverageVarianceEstimation(
@@ -87,8 +107,8 @@ function SlicedAverageVarianceEstimation(
     return SlicedAverageVarianceEstimation(
         y,
         X,
-        mn,
         Xw,
+        mn,
         nslice,
         M,
         A,
@@ -151,10 +171,10 @@ Use Sliced Average Variance Estimation (SAVE) to estimate the effective dimensio
 """
 function fit(
     ::Type{SlicedAverageVarianceEstimation},
-    X,
-    y;
+    X::AbstractMatrix,
+    y::AbstractVector;
     nslice = max(8, size(X, 2) + 3),
-    ndir = 2,
+    ndir = min(5, size(X, 2)),
 )
     if !issorted(y)
         error("y must be sorted")
@@ -168,27 +188,64 @@ function coef(r::SlicedAverageVarianceEstimation)
     return r.dirs
 end
 
-function dimension_test(save::SlicedAverageVarianceEstimation)
+struct SAVEDimensionTest <: HypothesisTest
+    nstat::Vector{Float64}
+    gstat::Vector{Float64}
+    ndof::Vector{Float64}
+    gdof::Vector{Float64}
+end
+
+function teststat(dt::SAVEDimensionTest; method=:normal)
+    (; nstat, gstat, ndof, gdof) = dt
+    if method == :normal
+        return dt.nstat
+    elseif method == :general
+        return dt.gstat
+    else
+        throw(ArgumentError("Unkown method='$(method)'"))
+    end
+end
+
+function dof(dt::SAVEDimensionTest; method=:normal)
+    (; nstat, gstat, ndof, gdof) = dt
+    if method == :normal
+        return dt.ndof
+    elseif method == :general
+        return dt.gdof
+    else
+        throw(ArgumentError("Unkown method='$(method)'"))
+    end
+end
+
+function pvalue(dt::SAVEDimensionTest; method=:normal)
+    (; nstat, gstat, ndof, gdof) = dt
+    if method == :normal
+        return 1 .- cdf.(Chisq.(ndof), nstat)
+    elseif method == :general
+        return 1 .- cdf.(Chisq.(gdof), gstat)
+    else
+        throw(ArgumentError("Unkown method='$(method)'"))
+    end
+end
+
+function dimension_test(save::SlicedAverageVarianceEstimation; maxdim::Int = nvar(save), method=:chisq, args...)
 
     (; X, Xw, A, dirs, eigs, eigv) = save
-    ndirs = size(dirs, 2)
     h = save.nslice
-    p = length(eigs)
-    n = length(save.y)
+    p = nvar(save)
+    maxdim = maxdim < 0 ? min(p - 1, save.nslice - 2) : maxdim
+    maxdim = min(maxdim, min(p - 1, save.nslice - 2))
+    n = nobs(save)
 
     # Test statistic based on normal and general theory
-    nstat = zeros(ndirs)
-    gstat = zeros(ndirs)
+    nstat = zeros(maxdim + 1)
+    gstat = zeros(maxdim + 1)
 
     # Degrees of freedom based on normal and general theory
-    ndf = zeros(ndirs)
-    gdf = zeros(ndirs)
+    ndof = zeros(maxdim + 1)
+    gdof = zeros(maxdim + 1)
 
-    # P-values based on normal and general theory
-    npv = zeros(ndirs)
-    gpv = zeros(ndirs)
-
-    for i = 0:ndirs-1
+    for i = 0:maxdim
 
         E = eigv[:, i+1:end]
         H = Xw * E
@@ -199,28 +256,19 @@ function dimension_test(save::SlicedAverageVarianceEstimation)
             nstat[i+1] += sum((E' * A[j] * E) .^ 2) * n / 2
         end
 
-        # Normal theory degrees of freedom and p-value
-        ndf[i+1] = (h - 1) * (p - i) * (p - i + 1) / 2
-        npv[i+1] = 1 - cdf(Chisq(ndf[i+1]), nstat[i+1])
+        # Normal theory degrees of freedom
+        ndof[i+1] = (h - 1) * (p - i) * (p - i + 1) / 2
 
         # General theory test
         for j = 1:n
             ZH[j, :] = vec(H[j, :] * H[j, :]')
         end
         S = cov(ZH) / 2
-        gdf[i+1] = (h - 1) * sum(diag(S))^2 / sum(S .^ 2)
+        gdof[i+1] = (h - 1) * sum(diag(S))^2 / sum(S .^ 2)
         gstat[i+1] = nstat[i+1] * sum(diag(S)) / sum(S .^ 2)
-        gpv[i+1] = 1 - cdf(Chisq(gdf[i+1]), gstat[i+1])
     end
 
-    return (
-        NormalPvals = npv,
-        NormalStat = nstat,
-        NormalDegf = ndf,
-        GeneralPvals = gpv,
-        GeneralStat = gstat,
-        GeneralDegf = gdf,
-    )
+    return SAVEDimensionTest(nstat, gstat, ndof, gdof)
 end
 
 function slice_covs(X, bd)

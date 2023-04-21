@@ -12,6 +12,9 @@ mutable struct PrincipalHessianDirections <: DimensionReductionModel
     "`X`: the explanatory variables, sorted to align with `y`"
     X::AbstractMatrix
 
+    "`Xw`: the whitened explanatory variables, sorted to align with `y`"
+    Xw::AbstractMatrix
+
 	"`Xmean`: the means of the columns of X"
 	Xmean::AbstractVector
 
@@ -26,9 +29,26 @@ mutable struct PrincipalHessianDirections <: DimensionReductionModel
 
     "`method`: one of 'y', 'r', or 'q'."
     method::String
+end
 
-    "`n`: the sample size"
-    n::Int
+function modelmatrix(m::PrincipalHessianDirections)
+    return m.X
+end
+
+function nobs(m::PrincipalHessianDirections)
+    return length(m.y)
+end
+
+function nvar(m::PrincipalHessianDirections)
+    return size(m.X, 2)
+end
+
+function response(m::PrincipalHessianDirections)
+    return m.y
+end
+
+function whitened_predictors(m::PrincipalHessianDirections)
+    return m.Xw
 end
 
 function _resid(y, X, method)
@@ -92,7 +112,7 @@ function fit(
         dirs[:, j] ./= norm(dirs[:, j])
     end
 
-    return PrincipalHessianDirections(y, X, mn, M, dirs, eigs, method, length(y))
+    return PrincipalHessianDirections(y, X, Xw, mn, M, dirs, eigs, method)
 end
 
 """
@@ -101,21 +121,27 @@ end
 Returns p-values and Chi-squared statistics for the null hypotheses
 that only the largest k eigenvalues are non-null.
 """
-function dimension_test(s::PrincipalHessianDirections)
+function dimension_test(phd::PrincipalHessianDirections; maxdim::Int = nvar(phd), method=:chisq, args...)
 
-    p = length(s.eigs)
-    stat = zeros(p)
-    pv = zeros(p)
-    df = zeros(Int, p)
-    vy = var(s.y)
-
-    for k = 0:p-1
-        stat[k+1] = s.n * (p - k) * mean(abs2, s.eigs[k+1:end]) / (2 * vy)
-        df[k+1] = div((p - k + 1) * (p - k), 2)
-        pv[k+1] = 1 - cdf(Chisq(df[k+1]), stat[k+1])
+    if !(method in [:chisq, :diva])
+        @error("Unknown dimension test method '$(method)'")
     end
 
-    return (Pvals = pv, Stat = stat, Degf = df)
+    if method == :diva
+        return _dimension_test_diva(phd; maxdim=maxdim, args...)
+    end
+
+    p = length(phd.eigs)
+    stat = zeros(p)
+    dof = zeros(Int, p)
+    vy = var(phd.y)
+
+    for k = 0:p-1
+        stat[k+1] = nobs(phd) * (p - k) * mean(abs2, phd.eigs[k+1:end]) / (2 * vy)
+        dof[k+1] = div((p - k + 1) * (p - k), 2)
+    end
+
+    return DimensionTest(stat, dof)
 end
 
 function coef(r::PrincipalHessianDirections)

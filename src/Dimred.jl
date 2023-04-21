@@ -2,7 +2,7 @@ module Dimred
 
 using Distributions: cdf, Beta
 
-import StatsAPI: fit, fit!, coef, response, RegressionModel
+import StatsAPI: fit, fit!, coef, response, RegressionModel, modelmatrix, nobs, HypothesisTest, pvalue, dof
 
 import Statistics, Random
 
@@ -16,12 +16,19 @@ export SlicedInverseRegression,
     coordinate_test,
     slicer,
     eig,
-    coef,
-    fit,
     mpsir,
+    teststat,
+
+    # Add methods to StatsAPI
+    coef,
+    nvar,
+    fit,
     fit!,
     coef,
-    response
+    response,
+    modelmatrix,
+    pvalue,
+    dof
 
 include("sir.jl")
 include("phd.jl")

@@ -13,31 +13,31 @@ mutable struct SlicedInverseRegression <: DimensionReductionModel
     "`y`: the response variable, sorted"
     y::AbstractVector
 
-    "`X`: the explanatory variables, sorted to align with `y`"
+    "`X`: the centered explanatory variables, sorted to align with `y`.  The observations (variables) are in rows (columns) of `X`."
     X::AbstractMatrix
 
-    "`Xmean`: the means of the columns of X"
-    Xmean::AbstractVector
-
-    "`Xw`: the whitened explanatory variables"
+    "`Xw`: the whitened explanatory variables, same shape as `X`"
     Xw::AbstractMatrix
 
-    "`sm`: the slice means (each column contains one slice mean)"
+    "`Xmean`: the means of the columns of `X`"
+    Xmean::AbstractVector
+
+    "`sm`: the slice means of whitened data `Xw` (each column contains one slice mean)"
     sm::AbstractMatrix
 
     "`M`: the covariance of the decorrelated slice means"
     M::AbstractMatrix
 
-    "`fw`: the proportion of the original data in each slice"
+    "`fw`: the proportion of the observations in each slice"
     fw::AbstractVector
 
-    "`dirs`: a basis for the estimated effective dimension reduction (EDR) space"
+    "`dirs`: the columns are a basis for the estimated effective dimension reduction (EDR) space"
     dirs::AbstractMatrix
 
-    "`eigs`: the eigenvalues of M, sorted by decreasing eigenvalue"
+    "`eigs`: the eigenvalues of `M`, sorted by decreasing eigenvalue"
     eigs::AbstractVector
 
-    "`eigv`: the eigenvectors of M, sorted by decreasing eigenvalue"
+    "`eigv`: the eigenvectors of `M`, sorted by decreasing eigenvalue"
     eigv::AbstractMatrix
 
     "`trans`: map data coordinates to orthogonalized coordinates"
@@ -46,22 +46,28 @@ mutable struct SlicedInverseRegression <: DimensionReductionModel
     "`bd`: slice bounds"
     bd::AbstractVector
 
-    "`slice_assignments`: the slice indicator for each observation, aligns
-    with data supplied by user"
+    "`slice_assignments`: the slice indicator for each observation, aligns with data supplied by user"
     slice_assignments::AbstractVector
 
     "`nslice`: the number of slices"
     nslice::Int
-
-    "`n`: the sample size"
-    n::Int
 end
 
-whitened_predictors = m::SlicedInverseRegression -> m.Xw
+function whitened_predictors(m::SlicedInverseRegression)
+    return m.Xw
+end
 
-nobs = m::SlicedInverseRegression -> length(m.y)
+function modelmatrix(m::SlicedInverseRegression)
+    return m.X
+end
 
-nvar = m::SlicedInverseRegression -> size(m.X, 2)
+function nobs(m::SlicedInverseRegression)
+    return length(m.y)
+end
+
+function nvar(m::SlicedInverseRegression)
+    return size(m.X, 2)
+end
 
 function response(m::SlicedInverseRegression)
     return m.y
@@ -107,8 +113,8 @@ function SlicedInverseRegression(
     return SlicedInverseRegression(
         y,
         X,
-        mn,
         Xw,
+        mn,
         sm,
         zeros(0, 0),
         fw,
@@ -118,8 +124,7 @@ function SlicedInverseRegression(
         trans,
         bd,
         sa,
-        h,
-        n,
+        h
     )
 end
 
@@ -176,12 +181,13 @@ function slicer(y::AbstractVector, nslice::Integer)
     end
 end
 
-# Calculate means of blocks of consecutive rows of x.  The number of
-# blocks is nslice
+# Calculate means of blocks of consecutive rows of x.  bd contains
+# the slice boundaries.  The slice means are in the columns of
+# the returned matrix.
 function slice_means(X::AbstractMatrix, bd::AbstractVector)
 
     n, p = size(X)
-    h = length(bd) - 1
+    h = length(bd) - 1 # number of slices
 
     # Slice means and sample sizes
     sm = zeros(Float64, p, h)
@@ -205,8 +211,8 @@ end
 
 # Whiten the array X, which has already been centered.
 # When sym=true, the data are whitened using a symmetric
-# square root.  sym should always be set to true as this
-# is assumed by the coordinate tests.
+# square root.  sym should always be set to true when
+# using coordinate tests.
 function whiten(X; sym = true)
     n = size(X, 1)
     qrx = qr(X)
@@ -226,33 +232,57 @@ function whiten(X; sym = true)
     end
 end
 
+struct DimensionTest <: HypothesisTest
+    stat::Vector{Float64}
+    dof::Vector{Int64}
+end
+
+function pvalue(dt::DimensionTest)
+    (; stat, dof) = dt
+    return 1 .- cdf.(Chisq.(dof), stat)
+end
+
+function dof(dt::DimensionTest)
+    return dt.dof
+end
+
 """
     dimension_test(sir)
 
-Returns p-values and Chi-squared statistics for the null hypotheses
-that only the largest k eigenvalues are non-null.
+Test the null hypotheses that only the largest k eigenvalues are non-null.
+
+If method is ':chisq' use the chi-square test of Li (1992).  If method
+is ':diva' use the DIVA approach:
+
+"Inference for the dimension of a regression relationship using pseudo‐covariates"
+SH Huang, K Shedden, H Chang - Biometrics, 2022.
 """
-function dimension_test(sir::SlicedInverseRegression; maxdim::Int = -1, method=:chisq, args...)
+function dimension_test(sir::SlicedInverseRegression; maxdim::Int = nvar(sir), method=:chisq, args...)
+
+    if !(method in [:chisq, :diva])
+        @error("Unknown dimension test method '$(method)'")
+    end
 
     if method == :diva
         return _dimension_test_diva(sir; maxdim=maxdim, args...)
     end
 
+    # Only test when there are positive degrees of freedom
     p = length(sir.eigs)
     maxdim = maxdim < 0 ? min(p - 1, sir.nslice - 2) : maxdim
-    cs = zeros(maxdim + 1)
-    pv = zeros(maxdim + 1)
-    df = zeros(Int, maxdim + 1)
+    maxdim = min(maxdim, min(p - 1, sir.nslice - 2))
+    stat = zeros(maxdim + 1)
+    dof = zeros(Int, maxdim + 1)
 
     for k = 0:maxdim
-        cs[k+1] = sir.n * sum(sir.eigs[k+1:end])
-        df[k+1] = (p - k) * (sir.nslice - k - 1)
-        pv[k+1] = 1 - cdf(Chisq(df[k+1]), cs[k+1])
+        stat[k+1] = nobs(sir) * sum(sir.eigs[k+1:end])
+        dof[k+1] = (p - k) * (sir.nslice - k - 1)
     end
 
-    return (Pvals = pv, Stat = cs, Degf = df)
+    return DimensionTest(stat, dof)
 end
 
+# Returns the symmetric square root of A.
 function ssqrt(A::Symmetric)
     eg = eigen(A)
     F = eg.vectors
@@ -327,17 +357,110 @@ function ct_pvalues(Omega, T, pmethod)
 end
 
 """
-    coordinate_test(sir::SlicedInverseRegression, Hyp, ndir; pmethod)
+    coordinate_test(sir::SlicedInverseRegression, Hyp; method=:chisq)
 
 Test the null hypothesis that Hyp' * B = 0, where B is a basis for
 the estimated SDR subspace.
 
-Reference:
+References:
+
+DR Cook. Testing predictor contributions in sufficient dimension
+reduction.  Annals of Statistics (2004), 32:3.
+https://arxiv.org/pdf/math/0406520.pdf
+
 Yu, Zhu, Wen. On model-free conditional coordinate tests for regressions.
 Journal of Multivariate Analysis 109 (2012), 61-67.
 https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
 """
-function coordinate_test(sir::SlicedInverseRegression, Hyp, ndir; pmethod = "bx")
+function coordinate_test(sir::SlicedInverseRegression, Hyp::AbstractMatrix, args...; method=:chisq, kwargs...)
+
+    if method == :chisq
+        return _coord_test_chisq(sir, Hyp; kwargs...)
+    elseif method == :vonmises
+        return _coord_test_vonmises(sir, Hyp, args...; kwargs...)
+    else
+        error("Unknown method='$(method)'")
+    end
+end
+
+struct CoordinateTest
+    tstat::Float64
+    dof::Float64
+    rstat::Float64
+    pvalue::Float64
+end
+
+function pvalue(ct::CoordinateTest)
+    return ct.pvalue
+end
+
+function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pmethod="bx")
+
+    (; y, X, Xw, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
+
+    r = size(Hyp, 2)
+    n, p = size(X)
+    h = length(bd) - 1
+
+    # Slice frequencies
+    ns = diff(bd)
+    fw = Float64.(ns)
+    fw ./= sum(fw)
+
+    # cov(X) and its inverted symmetric square root
+    Sigma = Symmetric(cov(X))
+    Sri = ssqrti(Sigma)
+
+    # An orthogonal basis for the null hypothesis in the whitened coordinates
+    A = Sri * Hyp
+    alpha = A * ssqrti(Symmetric(A' * A))
+
+    # The test statistic
+    u = alpha' * sir.sm * Diagonal(sqrt.(sir.fw))
+    tstat = n * sum(abs2, u)
+
+    # OLS residuals of the slice indicators.
+    J = zeros(n)
+    Q = Matrix(qr(X).Q)
+    eps = zeros(n, h)
+    for i in 1:h
+        J .= 0
+        J[bd[i]:bd[i+1]-1] .= 1
+        eps[:, i] .= J .- fw[i] - Q * (Q' * J)
+    end
+
+    # The null distribution of the test statistic is a weighted
+    # sum of chisquare(1) distributions with weights equal to
+    # the eigenvalues of Omega, constructed below.
+    Omega = zeros(h*r, h*r)
+    for i in 1:n
+        u = alpha' * Xw[i, :]
+        c = u * u'
+        b = eps[i, :] ./ sqrt.(fw)
+        b = b * b'
+        Omega .+= kron(b, c)
+    end
+    Omega ./= n
+    T, degf, pval = ct_pvalues(Omega, tstat, pmethod)
+
+    return CoordinateTest(T, degf, tstat, pval)
+end
+
+struct CoordinateTestVonMises
+    stat1::Float64
+    dof1::Float64
+    pval1::Float64
+    stat2::Float64
+    dof2::Float64
+    pval2::Float64
+end
+
+function pvalue(ct::CoordinateTestVonMises)
+    return [ct.pval1, ct.pval2]
+end
+
+# The conditional coordinate test of Yu, Zhu and Wen.
+function _coord_test_vonmises(sir::SlicedInverseRegression, Hyp::AbstractMatrix, ndir::Int; pmethod="bx")
 
     (; y, X, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
 
@@ -347,8 +470,8 @@ function coordinate_test(sir::SlicedInverseRegression, Hyp, ndir; pmethod = "bx"
     @assert size(Hyp, 1) == p
 
     # cov(X) and its inverted symmetric square root
-    Sigma = trans' * trans
-    Sri = ssqrti(Symmetric(Sigma))
+    Sigma = Symmetric(cov(X))
+    Sri = ssqrti(Sigma)
 
     # Calculate the test statistic
     P = sir.eigv[:, 1:ndir] * sir.eigv[:, 1:ndir]'
@@ -414,14 +537,7 @@ function coordinate_test(sir::SlicedInverseRegression, Hyp, ndir; pmethod = "bx"
     stat1, degf1, pval1 = ct_pvalues(Omega1, T1, pmethod)
     stat2, degf2, pval2 = ct_pvalues(Omega2, T2, pmethod)
 
-    return (
-        Stat1 = T1,
-        Pval1 = pval1,
-        Degf1 = degf1,
-        Stat2 = T2,
-        Pval2 = pval2,
-        Degf2 = degf2,
-    )
+    return CoordinateTestVonMises(T1, degf1, pval1, T2, degf2, pval2)
 end
 
 # Convert the array of slice boundaries to an array of slice indicators.
@@ -460,7 +576,7 @@ function fit!(sir::SlicedInverseRegression; ndir::Integer = 2)
 end
 
 """
-    sir(y, x; nslice=20, ndir=2)
+    sir(y, x; nslice, ndir)
 
 Use Sliced Inverse Regression (SIR) to estimate the effective dimension reduction (EDR) space.
 

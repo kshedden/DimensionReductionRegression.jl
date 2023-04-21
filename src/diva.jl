@@ -1,4 +1,8 @@
 
+struct DIVADimensionTest
+    dimension::Int
+end
+
 # Generate Beta-referenced p-values for DIVA.  These
 # are internal values and not directly reported as
 # results.
@@ -23,11 +27,13 @@ function _diva_pvals(m::DimensionReductionModel, r)
     return pvals
 end
 
-# Use the DIVA approach to test the dimension of a dimension reduction regression
-# model.  'maxdim' is the greatest dimension considered in testing, 's' is the number
-# of times DIVA is repeated, and 'r' is the number of pseudo-covariates used to augment
-# the regression design matrix.  If 'r' or 'maxdim' are not provided, their default values
-# are the number of observed covariates.
+# Use the DIVA approach to assess the dimension of a dimension
+# reduction regression model using sequential hypothesis tests.
+# 'alpha' is the type-1 error rate, 'maxdim' is the greatest dimension
+# considered in testing, 's' is the number of times DIVA is repeated,
+# and 'r' is the number of pseudo-covariates used to augment the
+# regression design matrix.  If 'r' or 'maxdim' are not provided,
+# their default values are the number of observed covariates.
 function _dimension_test_diva(m::DimensionReductionModel; maxdim::Int=nvar(m), s::Int=1,
                               r::Int=nvar(m), alpha::Float64=0.05)
 
@@ -42,11 +48,13 @@ function _dimension_test_diva(m::DimensionReductionModel; maxdim::Int=nvar(m), s
         end
     end
 
-    return length(pvals)
+    return DIVADimensionTest(length(pvals))
 end
 
 function _dimension_test_diva_stabilized(m::DimensionReductionModel, s::Int, maxdim::Int,
                                          r::Int, alpha::Float64)
+
+    p = nvar(m)
 
     # Run DIVA s times
     pvals = [_diva_pvals(m, r) for _ in 1:s]
@@ -73,5 +81,7 @@ function _dimension_test_diva_stabilized(m::DimensionReductionModel, s::Int, max
 
     j = findfirst(pva .> alpha)
     d0 = min(p, r)
-    return isnothing(j) ? d0 : j - 1
+    d = isnothing(j) ? d0 : j - 1
+
+    return DIVADimensionTest(d)
 end

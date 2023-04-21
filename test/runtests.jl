@@ -112,9 +112,9 @@ end
     @test isapprox(m.M, m.M')
 
     # Check that the dimension inference is the same.
-    @test isapprox(mt.Pvals[1:4], tst[1:4, :p_value])
-    @test isapprox(mt.Stat[1:4], tst[1:4, :Stat])
-    @test isapprox(mt.Degf[1:4], tst[1:4, :df])
+    @test isapprox(pvalue(mt)[1:4], tst[1:4, :p_value])
+    @test isapprox(mt.stat[1:4], tst[1:4, :Stat])
+    @test isapprox(dof(mt)[1:4], tst[1:4, :df])
 
     @test all(size(evectors) .== size(coef(m)))
 
@@ -161,16 +161,16 @@ end
         nslice = 50
         si = SlicedInverseRegression(y, x, nslice)
         fit!(si; ndir = 2)
-        pv = dimension_test(si)
-        @test pv.Pvals[1] < 1e-3
+        dt = dimension_test(si)
+        @test pvalue(dt)[1] < 1e-3
         if j == 1
             ed = si.dirs[:, 1]
             td = [-1, 1]
             @test isapprox(ed[2] / ed[1], td[2] / td[1], atol = 0.01, rtol = 0.05)
-            @test pv.Pvals[2] > 0.1
+            @test pvalue(dt)[2] > 0.1
             @test abs(si.eigs[1] / si.eigs[2]) > 5
         else
-            @test pv.Pvals[2] < 0.005
+            @test pvalue(dt)[2] < 0.005
         end
     end
 end
@@ -207,9 +207,9 @@ end
     @test isapprox(m.M, m.M')
 
     # Check that the dimension inference is the same.
-    @test isapprox(mt.Pvals[1:4], tst[1:4, :p_value])
-    @test isapprox(mt.Stat[1:4], tst[1:4, :Stat])
-    @test isapprox(mt.Degf[1:4], tst[1:4, :df])
+    @test isapprox(pvalue(mt)[1:4], tst[1:4, :p_value])
+    @test isapprox(mt.stat[1:4], tst[1:4, :Stat])
+    @test isapprox(dof(mt)[1:4], tst[1:4, :df])
 
     @test all(size(evectors) .== size(coef(m)))
 
@@ -245,16 +245,16 @@ end
     evectors = r[:evectors][:, 1:ndir]
 
     m = fit(PrincipalHessianDirections, X, y; ndir=ndir, method="r")
-    mt = dimension_test(m)
+    mt = dimension_test(m; maxdim=4)
 
     # Compare the kernel matrices
     @test isapprox(eigen(M).values, eigen(m.M).values)
     @test isapprox(m.M, m.M')
 
     # Check that the dimension inference is the same.
-    @test isapprox(mt.Pvals[1:4], tst[1:4, "Normal theory"])
-    @test isapprox(mt.Stat[1:4], tst[1:4, :Stat])
-    @test isapprox(mt.Degf[1:4], tst[1:4, :df])
+    @test isapprox(pvalue(mt)[1:4], tst[1:4, "Normal theory"])
+    @test isapprox(mt.stat[1:4], tst[1:4, :Stat])
+    @test isapprox(dof(mt)[1:4], tst[1:4, :df])
 
     @test all(size(evectors) .== size(coef(m)))
 
@@ -297,7 +297,7 @@ end
 
     n = 200
     p = 5
-    ndir = 4
+    ndir = 3
     rng = StableRNG(123)
 
     X, y = gendat(n, p, rng)
@@ -309,7 +309,7 @@ end
     R"
     library(dr)
     r = dr.compute(X, y, array(1, length(y)), method='save')
-    tst = dr.test(r, numdir=ndir)
+    tst = dr.test(r, numdir=ndir+1)
     M = r$M
     "
 
@@ -319,17 +319,17 @@ end
     evectors = r[:evectors][:, 1:ndir]
 
     m = fit(SlicedAverageVarianceEstimation, X, y; ndir=ndir)
-    mt = dimension_test(m)
+    mt = dimension_test(m; maxdim=ndir)
 
     # Compare the kernel matrices
     @test isapprox(eigen(M).values, eigen(m.M).values)
     @test isapprox(M, M')
 
     # Check that the dimension inference is the same.
-    @test isapprox(mt.NormalPvals[1:4], tst[1:4, "p_value(Nor)"])
-    @test isapprox(mt.GeneralPvals[1:4], tst[1:4, "p_value(Gen)"])
-    @test isapprox(mt.NormalStat[1:4], tst[1:4, :Stat])
-    @test isapprox(mt.NormalDegf[1:4], tst[1:4, "df(Nor)"])
+    @test isapprox(pvalue(mt; method=:normal), tst[1:ndir+1, "p_value(Nor)"])
+    @test isapprox(pvalue(mt, method=:general), tst[1:ndir+1, "p_value(Gen)"])
+    @test isapprox(teststat(mt, method=:normal), tst[1:ndir+1, :Stat])
+    @test isapprox(dof(mt, method=:normal), tst[1:ndir+1, "df(Nor)"])
 
     @test all(size(evectors) .== size(coef(m)))
 
@@ -358,9 +358,9 @@ end
 
         ph = fit(PrincipalHessianDirections, X, y; ndir = 1)
 
-        pv, cs, df = dimension_test(ph)
-        push!(cs2, cs[2])
-        push!(df2, df[2])
+        dt = dimension_test(ph)
+        push!(cs2, dt.stat[2])
+        push!(df2, dof(dt)[2])
     end
 
     # cs2 should behave like a sample of chi^2(2) values
