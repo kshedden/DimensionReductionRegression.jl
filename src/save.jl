@@ -13,8 +13,8 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
     "`X`: the explanatory variables, sorted to align with `y`"
     X::AbstractMatrix
 
-    "`Xw`: the whitened explanatory variables"
-    Xw::AbstractMatrix
+    "`Z`: the whitened explanatory variables"
+    Z::AbstractMatrix
 
 	"`Xmean`: the means of the columns of X"
 	Xmean::AbstractVector
@@ -25,7 +25,7 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
     "`M`: the save kernel matrix"
     M::AbstractMatrix
 
-    "`A`: the within-slice covariance matrices"
+    "`A`: sqrt(f_j)*(I - S_j) for each slice j, where S_j is the within-slice covariance matrix"
     A::Vector{AbstractMatrix}
 
     "`fw`: the proportion of the original data in each slice"
@@ -43,6 +43,7 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
     "`trans`: map data coordinates to orthogonalized coordinates"
     trans::AbstractMatrix
 
+    "`bd`: slice bounds"
     bd::AbstractVector
 
     "`slice_assignments`: the slice indicator for each observation, aligns
@@ -51,7 +52,7 @@ mutable struct SlicedAverageVarianceEstimation <: DimensionReductionModel
 end
 
 function whitened_predictors(m::SlicedAverageVarianceEstimation)
-    return m.Xw
+    return m.Z
 end
 
 function modelmatrix(m::SlicedAverageVarianceEstimation)
@@ -83,7 +84,7 @@ function SlicedAverageVarianceEstimation(
     # Transform to orthogonal coordinates
     y = copy(y)
     X, mn = center(X)
-    Xw, trans = whiten(X)
+    Z, trans = whiten(X)
 
     bd = slicer(y, nslice)
     sa = expand_slice_bounds(bd, length(y))
@@ -99,7 +100,7 @@ function SlicedAverageVarianceEstimation(
     fw = Float64.(ns)
     fw ./= sum(fw)
 
-    A, M = save_kernel(Xw, bd, fw)
+    A, M = save_kernel(Z, bd, fw)
 
     # Actual number of slices, may differ from nslice
     h = length(bd) - 1
@@ -107,7 +108,7 @@ function SlicedAverageVarianceEstimation(
     return SlicedAverageVarianceEstimation(
         y,
         X,
-        Xw,
+        Z,
         mn,
         nslice,
         M,
@@ -133,14 +134,11 @@ function save_kernel(X::AbstractMatrix, bd::AbstractVector, fw::AbstractVector)
     M = zeros(p, p)
     for i = 1:h
         c = I(p) - cov(X[bd[i]:bd[i+1]-1, :], corrected = false)
-        push!(A, sqrt(nw[i]) * c)
+        push!(A, sqrt(fw[i]) * c)
         M .+= nw[i] * c * c
     end
 
     M ./= n
-    for j in eachindex(A)
-        A[j] ./= sqrt(n)
-    end
 
     return A, M
 end
@@ -230,7 +228,15 @@ end
 
 function dimension_test(save::SlicedAverageVarianceEstimation; maxdim::Int = nvar(save), method=:chisq, args...)
 
-    (; X, Xw, A, dirs, eigs, eigv) = save
+    if !(method in [:chisq, :diva])
+        @error("Unknown dimension test method '$(method)'")
+    end
+
+    if method == :diva
+        return _dimension_test_diva(save; maxdim=maxdim, args...)
+    end
+
+    (; X, Z, A, dirs, eigs, eigv) = save
     h = save.nslice
     p = nvar(save)
     maxdim = maxdim < 0 ? min(p - 1, save.nslice - 2) : maxdim
@@ -248,7 +254,7 @@ function dimension_test(save::SlicedAverageVarianceEstimation; maxdim::Int = nva
     for i = 0:maxdim
 
         E = eigv[:, i+1:end]
-        H = Xw * E
+        H = Z * E
         ZH = zeros(n, (p - i) * (p - i))
 
         # Normal theory test statistics
@@ -284,18 +290,89 @@ function slice_covs(X, bd)
     return sc
 end
 
-"""
-	coordinate_test(sir::SlicedAverageVarianceEstimation, Hyp, ndir)
+struct SAVECoordinateTest <: HypothesisTest
+    stat_n::Float64
+    dof_n::Float64
+    pval_n::Float64
+    stat_g::Float64
+    dof_g::Float64
+    pval_g::Float64
+end
 
-Test the null hypothesis that Hyp' * B = 0, where B is a basis for
-the estimated SDR subspace.
+function pvalue(ct::SAVECoordinateTest; method=:normal)
+    if method == :normal
+        return ct.pval_n
+    elseif method == :general
+        return ct.pval_g
+    else
+        throw(ArgumentError("Unknown method=$(method) (options are normal and general)"))
+    end
+end
 
-Reference:
-Yu, Zhu, Wen. On model-free conditional coordinate tests for regressions.
-Journal of Multivariate Analysis 109 (2012), 61-67.
-https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
-"""
-function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp, ndir; pmethod = "bx")
+# Marginal chi^2 coordinate test
+# https://academic.oup.com/biomet/article/94/2/285/223789#2524699
+function _coord_test_chisq(save::SlicedAverageVarianceEstimation, Hyp::AbstractMatrix; pmethod=:bx)
+
+    (; y, X, Z, Xmean, M, eigs, eigv, trans, fw, A, bd, slice_assignments, trans, nslice) = save
+
+    n = nobs(save)
+    p = nvar(save)
+    h = length(bd) - 1 # Number of slices
+
+    # Ensure that the hypothesis is non-redundant and make it orthogonal.
+    Hyp, s, _ = svd(Hyp)
+    Hyp = Hyp[:, s .> 1e-10]
+    q = size(Hyp, 2)
+
+    # cov(X) and its inverted symmetric square root
+    Sigma = Symmetric(cov(X))
+    Sri = ssqrti(Sigma)
+
+    # Under the null hypotheis, col(Hz) is orthogonal to the SDR space.
+    # The formula in the paper is wrong (??).
+    B = Sri * Hyp
+    Hz = B * ssqrti(Symmetric(B' * B))
+
+    # Compute the test statistic
+    T = 0.0
+    for a in A
+        B = Hz' * a * Hz
+        T += tr(B*B)
+    end
+    T *= n
+
+    # Calibrate the test statistic
+    g = zeros(h)
+    V = Z * Hz
+    QN = zeros(n, q^2)
+    QG = zeros(n, h*q^2)
+    u = zeros(q, q)
+    ii = 1
+    for j in 1:h
+        g .= -fw
+        g[j] += 1
+        g ./= sqrt.(fw)
+
+        for i in bd[j]:bd[j+1]-1
+            u = V[i, :] * V[i,:]'
+            u .-= I(q)
+            QN[ii, :] = kron(V[i, :], V[i, :])
+            QG[ii, :] = kron(g, vec(u))
+            ii += 1
+        end
+    end
+
+    CN = cov(QN)
+    startn = q^2 - Int(q * (q + 1) / 2) + 1
+    CG = cov(QG)
+    startg = h*q^2 - Int(h * q * (q + 1) / 2) + 1
+
+    statn, dofn, pvaln = ct_pvalues(CN, T, h - 1, pmethod; start=startn)
+    statg, dofg, pvalg = ct_pvalues(CG, T, 1, pmethod; start=startg)
+    return SAVECoordinateTest(statn, dofn, pvaln, statg, dofg, pvalg)
+end
+
+function _coord_test_vonmises(save::SlicedAverageVarianceEstimation, Hyp::AbstractMatrix, ndir::Int; pmethod=:bx)
 
     (; y, X, Xmean, M, eigs, eigv, trans, fw, bd, slice_assignments, trans, nslice) = save
 
@@ -305,7 +382,9 @@ function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp, ndir; pmeth
     @assert size(Hyp, 1) == p
 
     # cov(X)
-    Sigma = trans' * trans
+    Sigma = Symmetric(cov(X))
+
+    # cov(X)^{-1/2}
     Sri = ssqrti(Symmetric(Sigma))
 
     # Calculate the test statistic
@@ -317,8 +396,17 @@ function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp, ndir; pmeth
     H = Sri * Hyp * K
     T1 = n * tr(H' * P * H)
 
+    # The second test statistic
+    PW = H * H'
+    QW = I(p) - PW
+    Mc = QW * M * QW
+    eg = eigen(Symmetric(Mc))
+    xi = eg.vectors[:, end-ndir+1:end]
+    Pc = xi * xi'
+    T2 = n * sum(abs2, P - Pc)
+
     U = slice_means(X, bd) * Diagonal(fw)
-    eg = eigen(Symmetric(Sigma))
+    eg = eigen(Sigma)
     c = eg.values
     P1 = eg.vectors
     C1 = getC1(c)
@@ -341,14 +429,6 @@ function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp, ndir; pmeth
         Lsave .-= u * (u' * (Sigma \ v)) / f^2
         Lsave .+= (u' * (Sigma \ u)) * u * u' / f^3
     end
-
-    PW = H * H'
-    QW = I(p) - PW
-    Mc = QW * M * QW
-    eg = eigen(Symmetric(Mc))
-    xi = eg.vectors[:, end:-1:1][:, 1:ndir]
-    Pc = xi * xi'
-    T2 = n * sum(abs2, P - Pc)
 
     Mstarstarsave = zeros(p, p)
     Lstarstarsir = zeros(p, p)
@@ -410,12 +490,29 @@ function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp, ndir; pmeth
     stat1, degf1, pval1 = ct_pvalues(Omega1, T1, pmethod)
     stat2, degf2, pval2 = ct_pvalues(Omega2, T2, pmethod)
 
-    return (
-        Stat1 = stat1,
-        Pval1 = pval1,
-        Degf1 = degf1,
-        Stat2 = stat2,
-        Pval2 = pval2,
-        Degf2 = degf2,
-    )
+    return SAVECoordinateTest(stat1, pval1, degf1, stat2, pval2, degf2)
+end
+
+"""
+	coordinate_test(sir::SlicedAverageVarianceEstimation, Hyp, ndir)
+
+Test the null hypothesis that Hyp' * B = 0, where B is a basis for
+the estimated SDR subspace.
+
+Reference:
+Yu, Zhu, Wen. On model-free conditional coordinate tests for regressions.
+Journal of Multivariate Analysis 109 (2012), 61-67.
+https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
+"""
+function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp::AbstractMatrix;
+                         ndir::Int=-1, pmethod::Symbol = :bx, method::Symbol=:chisq)
+
+    if method == :chisq
+        if ndir != -1
+            @warn("Ignoring provided dimension for marginal coordinate test")
+        end
+        return _coord_test_chisq(save, Hyp; pmethod=pmethod)
+    else
+        error("Unknown coordinate test method='$(method)'")
+    end
 end

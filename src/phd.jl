@@ -12,8 +12,8 @@ mutable struct PrincipalHessianDirections <: DimensionReductionModel
     "`X`: the explanatory variables, sorted to align with `y`"
     X::AbstractMatrix
 
-    "`Xw`: the whitened explanatory variables, sorted to align with `y`"
-    Xw::AbstractMatrix
+    "`Z`: the whitened explanatory variables, sorted to align with `y`"
+    Z::AbstractMatrix
 
 	"`Xmean`: the means of the columns of X"
 	Xmean::AbstractVector
@@ -48,7 +48,7 @@ function response(m::PrincipalHessianDirections)
 end
 
 function whitened_predictors(m::PrincipalHessianDirections)
-    return m.Xw
+    return m.Z
 end
 
 function _resid(y, X, method)
@@ -91,12 +91,12 @@ function fit(
     n, p = size(X)
 
     X, mn = center(X)
-    Xw, trans = whiten(X)
+    Z, trans = whiten(X)
 
     y = copy(y)
     y = _resid(y, X, method)
 
-    M = Xw' * Diagonal(y) * Xw
+    M = Z' * Diagonal(y) * Z
     M ./= n
 
     eg = eigen(M)
@@ -112,7 +112,7 @@ function fit(
         dirs[:, j] ./= norm(dirs[:, j])
     end
 
-    return PrincipalHessianDirections(y, X, Xw, mn, M, dirs, eigs, method)
+    return PrincipalHessianDirections(y, X, Z, mn, M, dirs, eigs, method)
 end
 
 """

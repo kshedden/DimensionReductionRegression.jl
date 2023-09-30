@@ -1,6 +1,7 @@
-using StatsBase, LinearAlgebra, Printf, Distributions
-
-abstract type DimensionReductionModel <: RegressionModel end
+using StatsBase
+using LinearAlgebra
+using Printf
+using Distributions
 
 """
     SlicedInverseRegression
@@ -16,13 +17,13 @@ mutable struct SlicedInverseRegression <: DimensionReductionModel
     "`X`: the centered explanatory variables, sorted to align with `y`.  The observations (variables) are in rows (columns) of `X`."
     X::AbstractMatrix
 
-    "`Xw`: the whitened explanatory variables, same shape as `X`"
-    Xw::AbstractMatrix
+    "`Z`: the whitened explanatory variables, same shape as `X`"
+    Z::AbstractMatrix
 
     "`Xmean`: the means of the columns of `X`"
     Xmean::AbstractVector
 
-    "`sm`: the slice means of whitened data `Xw` (each column contains one slice mean)"
+    "`sm`: the slice means of whitened data `Z` (each column contains one slice mean)"
     sm::AbstractMatrix
 
     "`M`: the covariance of the decorrelated slice means"
@@ -53,26 +54,6 @@ mutable struct SlicedInverseRegression <: DimensionReductionModel
     nslice::Int
 end
 
-function whitened_predictors(m::SlicedInverseRegression)
-    return m.Xw
-end
-
-function modelmatrix(m::SlicedInverseRegression)
-    return m.X
-end
-
-function nobs(m::SlicedInverseRegression)
-    return length(m.y)
-end
-
-function nvar(m::SlicedInverseRegression)
-    return size(m.X, 2)
-end
-
-function response(m::SlicedInverseRegression)
-    return m.y
-end
-
 function SlicedInverseRegression(
     y::AbstractVector,
     X::AbstractMatrix,
@@ -86,7 +67,7 @@ function SlicedInverseRegression(
     # Transform to orthogonal coordinates
     y = copy(y)
     X, mn = center(X)
-    Xw, trans = whiten(X)
+    Z, trans = whiten(X)
 
     # Storage for values to be set during fit.
     sm = zeros(0, 0)
@@ -103,7 +84,7 @@ function SlicedInverseRegression(
     h = length(bd) - 1
 
     # Estimate E[X | Y]
-    sm = slice_means(Xw, bd)
+    sm = slice_means(Z, bd)
 
     # Slice frequencies
     ns = diff(bd)
@@ -113,7 +94,7 @@ function SlicedInverseRegression(
     return SlicedInverseRegression(
         y,
         X,
-        Xw,
+        Z,
         mn,
         sm,
         zeros(0, 0),
@@ -317,9 +298,10 @@ end
 # Chi^2 statistics from a weighted sum of Chi^2(1).
 # The weights are the eigenvalues of Omega and T
 # is the value of the test statistic.
-function bx_pvalues(Omega, T)
+function bx_pvalues(Omega, T, dof, start)
     eg = eigen(Symmetric(Omega))
-    eigs = eg.values
+    eigs = eg.values[start:end]
+    eigs = repeat(eigs, dof)
     degf = sum(eigs)^2 / sum(eigs .^ 2)
     T *= degf / sum(eigs)
     pval = 1 - cdf(Chisq(degf), T)
@@ -327,17 +309,17 @@ function bx_pvalues(Omega, T)
 end
 
 # Use simulation to estimate p-values from a weighted
-# sum of Chi^2(1).  The weights are the eigenvalues of
-# Omega and T is the value of the test statistic.
-function sim_pvalues(Omega, T; nrep = 10000)
+# sum of Chi^2 draws.  The weights are the eigenvalues of
+# Omega, T is the value of the test statistic, dof is the
+# degrees of freedom for each Chi^2 value.
+function sim_pvalues(Omega, T, dof, start; nrep = 10000)
     eg = eigen(Symmetric(Omega))
-    eigs = eg.values
-    eigs = eigs[eigs .> 1e-8]
+    eigs = eg.values[start:end]
     p = length(eigs)
 
     pval = 0.0
     for i = 1:nrep
-        x = rand(Chisq(1), p)
+        x = rand(Chisq(dof), p)
         if dot(x, eigs) > T
             pval += 1
         end
@@ -346,13 +328,13 @@ function sim_pvalues(Omega, T; nrep = 10000)
     return T, 0, pval
 end
 
-function ct_pvalues(Omega, T, pmethod)
-    if pmethod == "bx"
-        return bx_pvalues(Omega, T)
-    elseif pmethod == "sim"
-        return sim_pvalues(Omega, T)
+function ct_pvalues(Omega, T, dof, pmethod; start=1)
+    if pmethod == :bx
+        return bx_pvalues(Omega, T, dof, start)
+    elseif pmethod == :sim
+        return sim_pvalues(Omega, T, dof, start)
     else
-        error("Unknown p-value method")
+        error("Unknown p-value method $(pmethod)")
     end
 end
 
@@ -372,14 +354,26 @@ Yu, Zhu, Wen. On model-free conditional coordinate tests for regressions.
 Journal of Multivariate Analysis 109 (2012), 61-67.
 https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
 """
-function coordinate_test(sir::SlicedInverseRegression, Hyp::AbstractMatrix, args...; method=:chisq, kwargs...)
+function coordinate_test(sir::SlicedInverseRegression, H0::AbstractMatrix; ndir::Int=-1, pmethod::Symbol=:bx,
+                         method::Symbol=:chisq, kwargs...)
 
     if method == :chisq
-        return _coord_test_chisq(sir, Hyp; kwargs...)
+        if ndir != -1
+            @warn("Ignoring provided dimension (ndir) for marginal coordinate test")
+        end
+        return _coord_test_chisq(sir, H0; pmethod=pmethod)
     elseif method == :vonmises
-        return _coord_test_vonmises(sir, Hyp, args...; kwargs...)
+        if ndir == -1
+            throw(ArgumentError("Dimension (ndir) is required for conditional coordinate test"))
+        end
+        return _coord_test_vonmises(sir, H0, ndir; pmethod=pmethod)
+    elseif method == :diva
+        if ndir != -1
+            @warn("Ignoring provided dimension (ndir) for DIVA coordinate test")
+        end
+        return _coord_test_diva(sir, H0; kwargs...)
     else
-        error("Unknown method='$(method)'")
+        error("Unknown coordinate test method='$(method)'")
     end
 end
 
@@ -394,9 +388,9 @@ function pvalue(ct::CoordinateTest)
     return ct.pvalue
 end
 
-function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pmethod="bx")
+function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pmethod=:bx)
 
-    (; y, X, Xw, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
+    (; y, X, Z, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
 
     r = size(Hyp, 2)
     n, p = size(X)
@@ -434,14 +428,14 @@ function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pm
     # the eigenvalues of Omega, constructed below.
     Omega = zeros(h*r, h*r)
     for i in 1:n
-        u = alpha' * Xw[i, :]
+        u = alpha' * Z[i, :]
         c = u * u'
         b = eps[i, :] ./ sqrt.(fw)
         b = b * b'
         Omega .+= kron(b, c)
     end
     Omega ./= n
-    T, degf, pval = ct_pvalues(Omega, tstat, pmethod)
+    T, degf, pval = ct_pvalues(Omega, tstat, 1, pmethod)
 
     return CoordinateTest(T, degf, tstat, pval)
 end
@@ -455,12 +449,12 @@ struct CoordinateTestVonMises
     pval2::Float64
 end
 
-function pvalue(ct::CoordinateTestVonMises)
-    return [ct.pval1, ct.pval2]
+function pvalue(ct::CoordinateTestVonMises; method=1)
+    return method == 1 ? ct.pval1 : ct.pval2
 end
 
 # The conditional coordinate test of Yu, Zhu and Wen.
-function _coord_test_vonmises(sir::SlicedInverseRegression, Hyp::AbstractMatrix, ndir::Int; pmethod="bx")
+function _coord_test_vonmises(sir::SlicedInverseRegression, Hyp::AbstractMatrix, ndir::Int; pmethod=:bx)
 
     (; y, X, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
 
@@ -534,8 +528,8 @@ function _coord_test_vonmises(sir::SlicedInverseRegression, Hyp::AbstractMatrix,
     Omega1 ./= n
     Omega2 ./= n
 
-    stat1, degf1, pval1 = ct_pvalues(Omega1, T1, pmethod)
-    stat2, degf2, pval2 = ct_pvalues(Omega2, T2, pmethod)
+    stat1, degf1, pval1 = ct_pvalues(Omega1, T1, 1, pmethod)
+    stat2, degf2, pval2 = ct_pvalues(Omega2, T2, 1, pmethod)
 
     return CoordinateTestVonMises(T1, degf1, pval1, T2, degf2, pval2)
 end
