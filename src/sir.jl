@@ -213,16 +213,6 @@ function whiten(X; sym = true)
     end
 end
 
-struct DimensionTest <: HypothesisTest
-    stat::Vector{Float64}
-    dof::Vector{Int64}
-end
-
-function pvalue(dt::DimensionTest)
-    (; stat, dof) = dt
-    return 1 .- cdf.(Chisq.(dof), stat)
-end
-
 function dof(dt::DimensionTest)
     return dt.dof
 end
@@ -355,18 +345,13 @@ Journal of Multivariate Analysis 109 (2012), 61-67.
 https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
 """
 function coordinate_test(sir::SlicedInverseRegression, H0::AbstractMatrix; ndir::Int=-1, pmethod::Symbol=:bx,
-                         method::Symbol=:chisq, kwargs...)
+                         method::Symbol=:chisq, resid::Bool=false, kwargs...)
 
     if method == :chisq
         if ndir != -1
             @warn("Ignoring provided dimension (ndir) for marginal coordinate test")
         end
         return _coord_test_chisq(sir, H0; pmethod=pmethod)
-    elseif method == :vonmises
-        if ndir == -1
-            throw(ArgumentError("Dimension (ndir) is required for conditional coordinate test"))
-        end
-        return _coord_test_vonmises(sir, H0, ndir; pmethod=pmethod)
     elseif method == :diva
         if ndir != -1
             @warn("Ignoring provided dimension (ndir) for DIVA coordinate test")
@@ -375,17 +360,6 @@ function coordinate_test(sir::SlicedInverseRegression, H0::AbstractMatrix; ndir:
     else
         error("Unknown coordinate test method='$(method)'")
     end
-end
-
-struct CoordinateTest
-    tstat::Float64
-    dof::Float64
-    rstat::Float64
-    pvalue::Float64
-end
-
-function pvalue(ct::CoordinateTest)
-    return ct.pvalue
 end
 
 function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pmethod=:bx)
