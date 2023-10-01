@@ -84,7 +84,7 @@ function genhyp(p)
     return Hyp1, Hyp2
 end
 
-function check_method(n, p, fitter; resid=false, nrep=1000, dt_kwds=(), ct_kwds=())
+function check_method(n, p, fitter; resid=false, method=:chisq, nrep=1000, dt_kwds=(), ct_kwds=())
     rslt = DataFrame(model=Int[], mode=String[], reject=Float64[])
     Hyp1, Hyp2 = genhyp(p)
     pvals = zeros(nrep)
@@ -98,13 +98,14 @@ function check_method(n, p, fitter; resid=false, nrep=1000, dt_kwds=(), ct_kwds=
             end
             for i in 1:nrep
                 y, X = gendat(n, p, model; r2=r2)
-
-                m = fitter(X, y; ndir=model, nslice=5)
-                ct = if resid
-                    coordinate_test_resid(m, hyp; dt_kwds=dt_kwds)
+                kwds = (resid=resid,)
+                if resid
+                    kwds = (kwds..., ct_kwds=ct_kwds, dt_kwds=dt_kwds)
                 else
-                    coordinate_test(m, hyp; ct_kwds...)
+                    kwds = (kwds..., method=method)
                 end
+                m = fitter(X, y; ndir=model, nslice=5)
+                ct = coordinate_test(m, hyp; kwds...)
                 pvals[i] = pvalue(ct)
             end
             push!(rslt.reject, mean(pvals .< nomlevel))
@@ -118,24 +119,38 @@ nrep = 1000
 sir_fitter = (X, y; ndir, nslice) -> fit(SlicedInverseRegression, X, y; ndir, nslice)
 save_fitter = (X, y; ndir, nslice) -> fit(SlicedAverageVarianceEstimation, X, y; ndir=2, nslice=5)
 
-function main(fitter; dt_kwds=(), ct_kwds=())
+function simstudy(fitter; resid=false, method=:chisq, dt_kwds=(), ct_kwds=())
     rslts = []
-    for resid in [true, false]
-        for n in [200, 400]
-            for p in [4, 8]
-                r = check_method(n, p, fitter; resid=resid, nrep=nrep,
-                                 dt_kwds=dt_kwds, ct_kwds=ct_kwds)
-                r[:, :resid] .= resid
-                r[:, :n] .= n
-                r[:, :p] .= p
-                push!(rslts, r)
-            end
+    for n in [200, 400]
+        for p in [4, 8]
+            r = check_method(n, p, fitter; resid=resid, method=method,
+                             nrep=nrep,
+                             dt_kwds=dt_kwds, ct_kwds=ct_kwds)
+            r[:, :resid] .= resid
+            r[:, :n] .= n
+            r[:, :p] .= p
+            push!(rslts, r)
         end
     end
     return vcat(rslts...)
 end
 
-rslt = main(sir_fitter; dt_kwds=(method=:chisq,), ct_kwds=(method=:chisq, pmethod=:bx))
+function main(fitter)
+
+    rslt1 = simstudy(fitter; resid=false, method=:chisq)
+    rslt1[:, :method] .= "Chi^2 coordinate test"
+
+    rslt2 = simstudy(fitter; resid=true)
+    rslt2[:, :method] .= "Chi^2 dimension test on residuals"
+
+    rslt3 = simstudy(fitter; resid=true, dt_kwds=(method=:diva, s=1))
+    rslt3[:, :method] .= "DIVA dimension test on residuals"
+
+    return vcat(rslt1, rslt2, rslt3)
+end
+
+rslt = main(sir_fitter)
 display(rslt)
+
 rslt = main(save_fitter)
 display(rslt)

@@ -328,40 +328,19 @@ function ct_pvalues(Omega, T, dof, pmethod; start=1)
     end
 end
 
-"""
-    coordinate_test(sir::SlicedInverseRegression, Hyp; method=:chisq)
-
-Test the null hypothesis that Hyp' * B = 0, where B is a basis for
-the estimated SDR subspace.
-
-References:
-
-DR Cook. Testing predictor contributions in sufficient dimension
-reduction.  Annals of Statistics (2004), 32:3.
-https://arxiv.org/pdf/math/0406520.pdf
-
-Yu, Zhu, Wen. On model-free conditional coordinate tests for regressions.
-Journal of Multivariate Analysis 109 (2012), 61-67.
-https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
-"""
-function coordinate_test(sir::SlicedInverseRegression, H0::AbstractMatrix; ndir::Int=-1, pmethod::Symbol=:bx,
-                         method::Symbol=:chisq, resid::Bool=false, kwargs...)
+function _coord_test(sir::SlicedInverseRegression, H0::AbstractMatrix; pmethod::Symbol=:bx,
+                     method::Symbol=:chisq)
 
     if method == :chisq
-        if ndir != -1
-            @warn("Ignoring provided dimension (ndir) for marginal coordinate test")
-        end
         return _coord_test_chisq(sir, H0; pmethod=pmethod)
     elseif method == :diva
-        if ndir != -1
-            @warn("Ignoring provided dimension (ndir) for DIVA coordinate test")
-        end
         return _coord_test_diva(sir, H0; kwargs...)
     else
         error("Unknown coordinate test method='$(method)'")
     end
 end
 
+# SIR-specific coordinate testing.
 function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pmethod=:bx)
 
     (; y, X, Z, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
@@ -414,99 +393,99 @@ function _coord_test_chisq(sir::SlicedInverseRegression, Hyp::AbstractMatrix; pm
     return CoordinateTest(T, degf, tstat, pval)
 end
 
-struct CoordinateTestVonMises
-    stat1::Float64
-    dof1::Float64
-    pval1::Float64
-    stat2::Float64
-    dof2::Float64
-    pval2::Float64
-end
+#struct CoordinateTestVonMises
+#    stat1::Float64
+#    dof1::Float64
+#    pval1::Float64
+#    stat2::Float64
+#    dof2::Float64
+#    pval2::Float64
+#end
 
-function pvalue(ct::CoordinateTestVonMises; method=1)
-    return method == 1 ? ct.pval1 : ct.pval2
-end
+#function pvalue(ct::CoordinateTestVonMises; method=1)
+#    return method == 1 ? ct.pval1 : ct.pval2
+#end
 
 # The conditional coordinate test of Yu, Zhu and Wen.
-function _coord_test_vonmises(sir::SlicedInverseRegression, Hyp::AbstractMatrix, ndir::Int; pmethod=:bx)
+#function _coord_test_vonmises(sir::SlicedInverseRegression, Hyp::AbstractMatrix, ndir::Int; pmethod=:bx)
 
-    (; y, X, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
+#    (; y, X, M, eigs, eigv, trans, fw, bd, slice_assignments, nslice) = sir
 
-    r = size(Hyp, 2)
-    n, p = size(X)
+#    r = size(Hyp, 2)
+#    n, p = size(X)
 
-    @assert size(Hyp, 1) == p
+#    @assert size(Hyp, 1) == p
 
     # cov(X) and its inverted symmetric square root
-    Sigma = Symmetric(cov(X))
-    Sri = ssqrti(Sigma)
+#    Sigma = Symmetric(cov(X))
+#    Sri = ssqrti(Sigma)
 
     # Calculate the test statistic
-    P = sir.eigv[:, 1:ndir] * sir.eigv[:, 1:ndir]'
-    J = Symmetric(Hyp' * (Sigma \ Hyp))
-    K = ssqrti(J)
+#    P = sir.eigv[:, 1:ndir] * sir.eigv[:, 1:ndir]'
+#    J = Symmetric(Hyp' * (Sigma \ Hyp))
+#    K = ssqrti(J)
 
     # The first test statistic
-    H = Sri * Hyp * K
-    T1 = n * tr(H' * P * H)
+#    H = Sri * Hyp * K
+#    T1 = n * tr(H' * P * H)
 
-    U = slice_means(X, bd) * Diagonal(fw)
-    eg = eigen(Symmetric(Sigma))
-    c = eg.values
-    P1 = eg.vectors
-    C1 = getC1(c)
-    F = eigv[:, 1:ndir] * Diagonal(1 ./ eigs[1:ndir]) * eigv[:, 1:ndir]'
+#    U = slice_means(X, bd) * Diagonal(fw)
+#    eg = eigen(Symmetric(Sigma))
+##    c = eg.values
+#    P1 = eg.vectors
+#    C1 = getC1(c)
+#    F = eigv[:, 1:ndir] * Diagonal(1 ./ eigs[1:ndir]) * eigv[:, 1:ndir]'
 
     # Lambda_sir
-    L = U * Diagonal(1 ./ fw) * U'
+ #   L = U * Diagonal(1 ./ fw) * U'
 
     # The second test statistic
-    PW = H * H'
-    QW = I(p) - PW
-    Mc = QW * M * QW
-    eg = eigen(Symmetric(Mc))
-    xi = eg.vectors[:, end:-1:1][:, 1:ndir]
-    Pc = xi * xi'
-    T2 = n * sum(abs2, P - Pc)
+ #   PW = H * H'
+ #   QW = I(p) - PW
+ #   Mc = QW * M * QW
+ #   eg = eigen(Symmetric(Mc))
+ #   xi = eg.vectors[:, end:-1:1][:, 1:ndir]
+ #   Pc = xi * xi'
+ #   T2 = n * sum(abs2, P - Pc)
 
     # von Mises expansion
-    Mstarstar = zeros(p, p)
-    Lstarstar = zeros(p, p)
-    Ustarstar = zeros(p, nslice)
-    SigStar = zeros(p, p)
-    A = zeros(r, p)
-    B = zeros(p, p)
-    R = zeros(p, p)
-    Omega1 = zeros(p * r, p * r)
-    Omega2 = zeros(p * p, p * p)
-    for i = 1:n
+ #   Mstarstar = zeros(p, p)
+ #   Lstarstar = zeros(p, p)
+ #   Ustarstar = zeros(p, nslice)
+ #   SigStar = zeros(p, p)
+ #   A = zeros(r, p)
+ #   B = zeros(p, p)
+ #   R = zeros(p, p)
+ #   Omega1 = zeros(p * r, p * r)
+ #   Omega2 = zeros(p * p, p * p)
+ #   for i = 1:n#
+#
+#        Ustarstar .= X[i, :] * fw'
+#        Ustarstar[:, slice_assignments[i]] .+= X[i, :]
 
-        Ustarstar .= X[i, :] * fw'
-        Ustarstar[:, slice_assignments[i]] .+= X[i, :]
-
-        Lstarstar .= Ustarstar * Diagonal(1 ./ fw) * U'
+#        Lstarstar .= Ustarstar * Diagonal(1 ./ fw) * U'
 
         # R = SigStar^{-1/2}
-        SigStar .= X[i, :] * X[i, :]' - Sigma
-        R .= P1 * (C1 .* (P1' * SigStar * P1)) * P1'
+ #       SigStar .= X[i, :] * X[i, :]' - Sigma
+ #       R .= P1 * (C1 .* (P1' * SigStar * P1)) * P1'
 
-        Mstarstar .= R * L * Sri + Sri * Lstarstar * Sri
-        A .= K * Hyp' * (R * P + Sri * Mstarstar * F)
-        Omega1 .+= vec(A) * vec(A)'
+ #       Mstarstar .= R * L * Sri + Sri * Lstarstar * Sri
+ #       A .= K * Hyp' * (R * P + Sri * Mstarstar * F)
+ #       Omega1 .+= vec(A) * vec(A)'
 
-        B .= (PW * Mstarstar + Sri * Hyp * (J \ Hyp') * R * M) * F
-        B .+= B'
-        Omega2 .+= vec(B) * vec(B)'
-    end
+ #       B .= (PW * Mstarstar + Sri * Hyp * (J \ Hyp') * R * M) * F
+ #       B .+= B'
+ #       Omega2 .+= vec(B) * vec(B)'
+ #   end
 
-    Omega1 ./= n
-    Omega2 ./= n
+ #   Omega1 ./= n
+ #   Omega2 ./= n
 
-    stat1, degf1, pval1 = ct_pvalues(Omega1, T1, 1, pmethod)
-    stat2, degf2, pval2 = ct_pvalues(Omega2, T2, 1, pmethod)
+ #   stat1, degf1, pval1 = ct_pvalues(Omega1, T1, 1, pmethod)
+ #   stat2, degf2, pval2 = ct_pvalues(Omega2, T2, 1, pmethod)
 
-    return CoordinateTestVonMises(T1, degf1, pval1, T2, degf2, pval2)
-end
+ #   return CoordinateTestVonMises(T1, degf1, pval1, T2, degf2, pval2)
+#end
 
 # Convert the array of slice boundaries to an array of slice indicators.
 function expand_slice_bounds(bd, n)

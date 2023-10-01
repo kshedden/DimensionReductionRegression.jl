@@ -493,24 +493,11 @@ function _coord_test_vonmises(save::SlicedAverageVarianceEstimation, Hyp::Abstra
     return SAVECoordinateTest(stat1, pval1, degf1, stat2, pval2, degf2)
 end
 
-"""
-	coordinate_test(sir::SlicedAverageVarianceEstimation, Hyp, ndir)
-
-Test the null hypothesis that Hyp' * B = 0, where B is a basis for
-the estimated SDR subspace.
-
-Reference:
-Yu, Zhu, Wen. On model-free conditional coordinate tests for regressions.
-Journal of Multivariate Analysis 109 (2012), 61-67.
-https://web.mst.edu/~wenx/papers/zhouzhuwen.pdf
-"""
-function coordinate_test(save::SlicedAverageVarianceEstimation, Hyp::AbstractMatrix;
-                         ndir::Int=-1, pmethod::Symbol = :bx, method::Symbol=:chisq)
+# SAVE-specific coordinate testing
+function _coord_test(save::SlicedAverageVarianceEstimation, Hyp;
+                    pmethod::Symbol = :bx, method::Symbol=:chisq)
 
     if method == :chisq
-        if ndir != -1
-            @warn("Ignoring provided dimension for marginal coordinate test")
-        end
         return _coord_test_chisq(save, Hyp; pmethod=pmethod)
     else
         error("Unknown coordinate test method='$(method)'")
