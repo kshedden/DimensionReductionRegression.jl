@@ -372,126 +372,126 @@ function _coord_test_chisq(save::SlicedAverageVarianceEstimation, Hyp::AbstractM
     return SAVECoordinateTest(statn, dofn, pvaln, statg, dofg, pvalg)
 end
 
-function _coord_test_vonmises(save::SlicedAverageVarianceEstimation, Hyp::AbstractMatrix, ndir::Int; pmethod=:bx)
+#function _coord_test_vonmises(save::SlicedAverageVarianceEstimation, Hyp::AbstractMatrix, ndir::Int; pmethod=:bx)
 
-    (; y, X, Xmean, M, eigs, eigv, trans, fw, bd, slice_assignments, trans, nslice) = save
+#    (; y, X, Xmean, M, eigs, eigv, trans, fw, bd, slice_assignments, trans, nslice) = save
 
-    r = size(Hyp, 2)
-    n, p = size(X)
+#    r = size(Hyp, 2)
+#    n, p = size(X)
 
-    @assert size(Hyp, 1) == p
+#    @assert size(Hyp, 1) == p
 
     # cov(X)
-    Sigma = Symmetric(cov(X))
+#    Sigma = Symmetric(cov(X))
 
     # cov(X)^{-1/2}
-    Sri = ssqrti(Symmetric(Sigma))
+#    Sri = ssqrti(Symmetric(Sigma))
 
     # Calculate the test statistic
-    P = eigv[:, 1:ndir] * eigv[:, 1:ndir]'
-    J = Symmetric(Hyp' * (Sigma \ Hyp))
-    K = ssqrti(J)
+#    P = eigv[:, 1:ndir] * eigv[:, 1:ndir]'
+#    J = Symmetric(Hyp' * (Sigma \ Hyp))
+#    K = ssqrti(J)
 
 	# The first test statistic
-    H = Sri * Hyp * K
-    T1 = n * tr(H' * P * H)
+#    H = Sri * Hyp * K
+#    T1 = n * tr(H' * P * H)
 
     # The second test statistic
-    PW = H * H'
-    QW = I(p) - PW
-    Mc = QW * M * QW
-    eg = eigen(Symmetric(Mc))
-    xi = eg.vectors[:, end-ndir+1:end]
-    Pc = xi * xi'
-    T2 = n * sum(abs2, P - Pc)
+#    PW = H * H'
+#    QW = I(p) - PW
+#    Mc = QW * M * QW
+#    eg = eigen(Symmetric(Mc))
+#    xi = eg.vectors[:, end-ndir+1:end]
+#    Pc = xi * xi'
+#    T2 = n * sum(abs2, P - Pc)
 
-    U = slice_means(X, bd) * Diagonal(fw)
-    eg = eigen(Sigma)
-    c = eg.values
-    P1 = eg.vectors
-    C1 = getC1(c)
-    F = eigv[:, 1:ndir] * Diagonal(1 ./ eigs[1:ndir]) * eigv[:, 1:ndir]'
+#    U = slice_means(X, bd) * Diagonal(fw)
+#    eg = eigen(Sigma)
+#    c = eg.values
+#    P1 = eg.vectors
+#    C1 = getC1(c)
+#    F = eigv[:, 1:ndir] * Diagonal(1 ./ eigs[1:ndir]) * eigv[:, 1:ndir]'
 
-    V = slice_covs(X, bd)
-    for j in eachindex(fw)
-        V[:, :, j] .*= fw[j]
-    end
+#    V = slice_covs(X, bd)
+#    for j in eachindex(fw)
+#        V[:, :, j] .*= fw[j]
+#    end
 
 	# Lambda_sir and Lambda_save
-    Lsir = U * Diagonal(1 ./ fw) * U'
-    Lsave = 2 * Lsir - Sigma
-    for j = 1:nslice
-        v = V[:, :, j]
-        u = U[:, j]
-        f = fw[j]
-        Lsave .+= v * (Sigma \ v) / f
-        Lsave .-= v * (Sigma \ u) * u' / f^2
-        Lsave .-= u * (u' * (Sigma \ v)) / f^2
-        Lsave .+= (u' * (Sigma \ u)) * u * u' / f^3
-    end
+#    Lsir = U * Diagonal(1 ./ fw) * U'
+#    Lsave = 2 * Lsir - Sigma
+ #   for j = 1:nslice
+ #       v = V[:, :, j]
+ #       u = U[:, j]
+ #       f = fw[j]
+ #       Lsave .+= v * (Sigma \ v) / f
+ #       Lsave .-= v * (Sigma \ u) * u' / f^2
+ #       Lsave .-= u * (u' * (Sigma \ v)) / f^2
+ #       Lsave .+= (u' * (Sigma \ u)) * u * u' / f^3
+ #   end
 
-    Mstarstarsave = zeros(p, p)
-    Lstarstarsir = zeros(p, p)
-    Lstarstarsave = zeros(p, p)
-    Gammastarstar = zeros(p, p)
-    Ustarstar = zeros(p, nslice)
-    Vstarstar = zeros(p, p, nslice)
-    SigmaStar = zeros(p, p)
-    A = zeros(r, p)
-    B = zeros(p, p)
-    R = zeros(p, p)
-    Omega1 = zeros(p * r, p * r)
-    Omega2 = zeros(p * p, p * p)
-    for i = 1:n
+ #   Mstarstarsave = zeros(p, p)
+ #   Lstarstarsir = zeros(p, p)
+ ##   Lstarstarsave = zeros(p, p)
+ #   Gammastarstar = zeros(p, p)
+ #   Ustarstar = zeros(p, nslice)
+ #   Vstarstar = zeros(p, p, nslice)
+ #   SigmaStar = zeros(p, p)
+ #   A = zeros(r, p)
+ #   B = zeros(p, p)
+ #   R = zeros(p, p)
+ #   Omega1 = zeros(p * r, p * r)
+ #   Omega2 = zeros(p * p, p * p)
+ #   for i = 1:n
 
-        Ustarstar .= X[i, :] * fw'
-        Ustarstar[:, slice_assignments[i]] .+= X[i, :]
+ #       Ustarstar .= X[i, :] * fw'
+ #       Ustarstar[:, slice_assignments[i]] .+= X[i, :]
 
-        for j = 1:nslice
-            Vstarstar[:, :, j] .= -fw[j] * Sigma
-			Vstarstar[:, :, j] .-= Ustarstar[:, j] * Xmean'
-        end
-        Vstarstar[:, :, slice_assignments[i]] .+= X[i, :] * X[i, :]'
+ #       for j = 1:nslice
+ #           Vstarstar[:, :, j] .= -fw[j] * Sigma#
+#			Vstarstar[:, :, j] .-= Ustarstar[:, j#] * Xmean'
+ #       end
+ #       Vstarstar[:, :, slice_assignments[i]] .+= X[i, :] * X[i, :]'
 
-        Lstarstarsir .= Ustarstar * Diagonal(1 ./ fw) * U'
-        SigmaStar .= X[i, :] * X[i, :]' - Sigma
+ #       Lstarstarsir .= Ustarstar * Diagonal(1 ./ fw) * U'
+ #       SigmaStar .= X[i, :] * X[i, :]' - Sigma
 
-        Gammastarstar .= 0
-        for j = 1:nslice
-            f = fw[j]
-            u = U[:, j]
-            uss = Ustarstar[:, j]
-            v = V[:, :, j]
-            vss = Vstarstar[:, :, j]
-            pstar = (slice_assignments[i] == j ? 1 : 0) - f
-            Gammastarstar .+= -pstar * Sigma + vss * (Sigma \ v) / f + Sigma * (SigmaStar \ v) + vss
-            Gammastarstar .-= vss * (Sigma \ u) * u' / f^2 + Sigma * (SigmaStar \ u) * u' / f + uss * u' / f
-            Gammastarstar .= (uss * u' * (Sigma \ v)) / f^2
-            Gammastarstar .+= (u' * (Sigma \ u)) * uss * u' / f^3
-        end
+#        Gammastarstar .= 0
+#        for j = 1:nslice
+#            f = fw[j]
+#            u = U[:, j]
+#            uss = Ustarstar[:, j]
+#            v = V[:, :, j]
+#            vss = Vstarstar[:, :, j]
+#            pstar = (slice_assignments[i] == j ? 1 : 0) - f
+#            Gammastarstar .+= -pstar * Sigma + vss * (Sigma \ v) / f + Sigma * (SigmaStar \ v) + vss
+#            Gammastarstar .-= vss * (Sigma \ u) * u' / f^2 + Sigma * (SigmaStar \ u) * u' / f + uss * u' / f
+#            Gammastarstar .= (uss * u' * (Sigma \ v)) / f^2
+#            Gammastarstar .+= (u' * (Sigma \ u)) * uss * u' / f^3
+#        end
 
         # R = SigStar^{-1/2}
-        R .= P1 * (C1 .* (P1' * SigmaStar * P1)) * P1'
+#        R .= P1 * (C1 .* (P1' * SigmaStar * P1)) * P1'
 
-        Lstarstarsave .= 2 * Lstarstarsir - SigmaStar + Gammastarstar
+#        Lstarstarsave .= 2 * Lstarstarsir - SigmaStar + Gammastarstar
 
-        Mstarstarsave .= R * Lsave * Sri + Sri * Lstarstarsave * Sri
-        A .= K * Hyp' * (R * P + Sri * Mstarstarsave * F)
-        Omega1 .+= vec(A) * vec(A)'
+#        Mstarstarsave .= R * Lsave * Sri + Sri * Lstarstarsave * Sri
+#        A .= K * Hyp' * (R * P + Sri * Mstarstarsave * F)
+#        Omega1 .+= vec(A) * vec(A)'
 
-        B .= (PW * Mstarstarsave + Sri * Hyp * (J \ Hyp') * R * M) * F
-        B .+= B'
-        Omega2 .+= vec(B) * vec(B)'
-    end
+#        B .= (PW * Mstarstarsave + Sri * Hyp * (J \ Hyp') * R * M) * F
+#        B .+= B'
+#        Omega2 .+= vec(B) * vec(B)'
+#    end
 
-    Omega1 ./= n
-    Omega2 ./= n
+#    Omega1 ./= n
+#    Omega2 ./= n
 
-    stat1, degf1, pval1 = ct_pvalues(Omega1, T1, pmethod)
-    stat2, degf2, pval2 = ct_pvalues(Omega2, T2, pmethod)
+#    stat1, degf1, pval1 = ct_pvalues(Omega1, T1, pmethod)
+#    stat2, degf2, pval2 = ct_pvalues(Omega2, T2, pmethod)
 
-    return SAVECoordinateTest(stat1, pval1, degf1, stat2, pval2, degf2)
-end
+#    return SAVECoordinateTest(stat1, pval1, degf1, stat2, pval2, degf2)
+#end
 
 # SAVE-specific coordinate testing
 function _coord_test(save::SlicedAverageVarianceEstimation, Hyp;

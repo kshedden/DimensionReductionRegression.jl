@@ -47,6 +47,7 @@ function gendat_quadratic(n, p, rng)
     return X, y
 end
 
+include("Aqua.jl")
 include("opg.jl")
 include("sir.jl")
 include("phd.jl")

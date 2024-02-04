@@ -25,7 +25,7 @@ mutable struct OPG <: DimensionReductionModel
     family::Distribution
 end
 
-function OPG(X, y, family; n_centers=-1, maxiter_spt=20)
+function OPG(X, y, family; n_centers=-1)
 
     if length(y) != size(X, 1)
         error(@sprintf("length of y should equal leading dimension of X"))
@@ -38,7 +38,7 @@ function OPG(X, y, family; n_centers=-1, maxiter_spt=20)
     ZC = if n_centers == -1
         Z
     else
-        spt = supportpoints(Z', n_centers; maxit=maxiter_spt)
+        spt = supportpoints(copy(Z'), n_centers)
         copy(spt')
     end
 

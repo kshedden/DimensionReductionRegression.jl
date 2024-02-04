@@ -143,7 +143,7 @@ function main(fitter)
     rslt2 = simstudy(fitter; resid=true)
     rslt2[:, :method] .= "Chi^2 dimension test on residuals"
 
-    rslt3 = simstudy(fitter; resid=true, dt_kwds=(method=:diva, s=1))
+    rslt3 = simstudy(fitter; resid=true, dt_kwds=(method=:diva, nstab=1))
     rslt3[:, :method] .= "DIVA dimension test on residuals"
 
     return vcat(rslt1, rslt2, rslt3)

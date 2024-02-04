@@ -18,7 +18,6 @@ export SlicedInverseRegression,
     coordinate_test,
     slicer,
     eig,
-    mpsir,
     OPG,
     teststat,
 
