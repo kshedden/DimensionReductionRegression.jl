@@ -76,7 +76,6 @@ end
     evectors = r[:evectors][:, 1:ndir]
 
     m = fit(SlicedInverseRegression, X, y; ndir=ndir)
-    mt = dimension_test(m)
 
     # Check that the coefficients are normalized
     @test all(isapprox.(sum(abs2, coef(m); dims=1), 1))
@@ -85,7 +84,8 @@ end
     @test isapprox(eigen(m.M).values, eigen(M).values)
     @test isapprox(m.M, m.M')
 
-    # Check that the dimension inference is the same.
+    # Check that the chi^2 dimension inference is the same.
+    mt = dimension_test(m)
     @test isapprox(pvalue(mt)[1:4], tst[1:4, :p_value])
     @test isapprox(mt.stat[1:4], tst[1:4, :Stat])
     @test isapprox(dof(mt)[1:4], tst[1:4, :df])

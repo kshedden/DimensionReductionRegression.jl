@@ -22,10 +22,14 @@ mutable struct OPG <: DimensionReductionModel
 
     dirs::AbstractMatrix
 
+    eigs::AbstractVector
+
     family::Distribution
+
+    models::Vector
 end
 
-function OPG(X, y, family; n_centers=-1)
+function OPG(X, y, family; n_centers=-1, verbosity=0)
 
     if length(y) != size(X, 1)
         error(@sprintf("length of y should equal leading dimension of X"))
@@ -38,11 +42,11 @@ function OPG(X, y, family; n_centers=-1)
     ZC = if n_centers == -1
         Z
     else
-        spt = supportpoints(copy(Z'), n_centers)
+        spt = supportpoints(copy(Z'), n_centers; verbosity=verbosity)
         copy(spt')
     end
 
-    return OPG(y, X, Z, ZC, trans, zeros(0, 0), family)
+    return OPG(y, X, Z, ZC, trans, zeros(0, 0), zeros(0), family, [])
 end
 
 function set_weights!(w, z, Z, bw)
@@ -52,9 +56,9 @@ function set_weights!(w, z, Z, bw)
     w .= exp.(-w ./ (2 * bw^2))
 end
 
-function fit!(opg::OPG; bw=1.0, ndir=2, verbose=false)
+function fit!(opg::OPG; bw=1.0, ndir=2, verbosity=0)
 
-    (; y, Z, ZC, trans, family) = opg
+    (; y, Z, ZC, trans, family, models) = opg
 
     n, p = size(Z)
     m = size(ZC, 1)
@@ -65,26 +69,28 @@ function fit!(opg::OPG; bw=1.0, ndir=2, verbose=false)
     XX[:, 1] .= 1
     XX[:, 2:end] .= Z
 
+    # Loop over the anchor points
     for i in 1:m
         # Localize the regression around ZC[i, :]
         set_weights!(w, ZC[i, :], Z, bw)
         md = fit(GLM.GeneralizedLinearModel, XX, y, family; wts=w)
+        push!(models, md)
         Q[i, :] = coef(md)[2:end]
 
-        if verbose && (i % 100 == 0)
+        if verbosity > 0 && (i % 100 == 0)
             println("$(i)/$(m)")
         end
     end
 
-    _, _, v = svd(Q)
+    _, s, v = svd(Q)
     opg.dirs = trans \ v[:, 1:ndir]
-
+    opg.eigs = s[1:ndir]
 end
 
 function fit(::Type{OPG}, X::AbstractMatrix, y::AbstractVector; family=Normal(),
-             bw=sqrt(size(X, 2)), ndir=2, n_centers::Int=-1, verbose::Bool=false)
+             bw=sqrt(size(X, 2)), ndir=2, n_centers::Int=-1, verbosity::Int=0)
 
-    opg = OPG(X, y, family; n_centers=n_centers)
-    fit!(opg; bw=bw, ndir=ndir, verbose=verbose)
+    opg = OPG(X, y, family; n_centers=n_centers, verbosity=verbosity)
+    fit!(opg; bw=bw, ndir=ndir, verbosity=verbosity)
     return opg
 end

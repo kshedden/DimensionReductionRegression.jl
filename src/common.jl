@@ -29,6 +29,20 @@ struct DimensionTest <: HypothesisTest
     dof::Vector{Int64}
 end
 
+function show(io::IO, dt::DimensionTest)
+
+    stat = teststat(dt)
+    pv = pvalue(dt)
+    d = length(pv)
+    header = ["Null dimension", "Alternative dimension", "Statistic", "P-value"]
+
+    da = hcat(["$(j-1)" for j in 1:d], [">=$(j)" for j in 1:d], stat, pv)
+
+    println(io, "Dimension test:")
+
+    pretty_table(io, da; header=header, tf=tf_simple)
+end
+
 function teststat(dt::DimensionTest)
     return dt.stat
 end
@@ -163,4 +177,20 @@ function _coord_test_resid(m::T, H0; fit_kwds=(), dt_kwds=()) where {T<:Dimensio
 
     ct = CoordinateTest(first(teststat(dt)), 0, 0, first(pvalue(dt)))
     return ct
+end
+
+# Returns the symmetric square root of A.
+function ssqrt(A::Symmetric)
+    eg = eigen(A)
+    F = eg.vectors
+    Q = sqrt.(eg.values)
+    return F * Diagonal(Q) * F'
+end
+
+# Returns the inverse of the symmetric square root of A.
+function ssqrti(A::Symmetric)
+    eg = eigen(A)
+    F = eg.vectors
+    Q = sqrt.(eg.values)
+    return F * Diagonal(1 ./ Q) * F'
 end

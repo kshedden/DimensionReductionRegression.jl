@@ -222,13 +222,13 @@ end
 
 Test the null hypotheses that only the largest k eigenvalues are non-null.
 
-If method is ':chisq' use the chi-square test of Li (1992).  If method
+If method is ':chisq' use the chi-square test of Li (1991).  If method
 is ':diva' use the DIVA approach:
 
 "Inference for the dimension of a regression relationship using pseudo‐covariates"
 SH Huang, K Shedden, H Chang - Biometrics, 2022.
 """
-function dimension_test(sir::SlicedInverseRegression; maxdim::Int = nvar(sir), method=:chisq, args...)
+function dimension_test(sir::SlicedInverseRegression; maxdim::Int=nvar(sir), method=:chisq, args...)
 
     if !(method in [:chisq, :diva])
         @error("Unknown dimension test method '$(method)'")
@@ -242,31 +242,12 @@ function dimension_test(sir::SlicedInverseRegression; maxdim::Int = nvar(sir), m
     p = length(sir.eigs)
     maxdim = maxdim < 0 ? min(p - 1, sir.nslice - 2) : maxdim
     maxdim = min(maxdim, min(p - 1, sir.nslice - 2))
-    stat = zeros(maxdim + 1)
-    dof = zeros(Int, maxdim + 1)
 
-    for k = 0:maxdim
-        stat[k+1] = nobs(sir) * sum(sir.eigs[k+1:end])
-        dof[k+1] = (p - k) * (sir.nslice - k - 1)
-    end
+    stat = nobs(sir) * cumsum(reverse(sir.eigs)) |> reverse
+    k = 0:maxdim
+    dof = (p .- k) .* (sir.nslice .- k .- 1)
 
     return DimensionTest(stat, dof)
-end
-
-# Returns the symmetric square root of A.
-function ssqrt(A::Symmetric)
-    eg = eigen(A)
-    F = eg.vectors
-    Q = sqrt.(eg.values)
-    return F * Diagonal(Q) * F'
-end
-
-# Returns the inverse of the symmetric square root of A.
-function ssqrti(A::Symmetric)
-    eg = eigen(A)
-    F = eg.vectors
-    Q = sqrt.(eg.values)
-    return F * Diagonal(1 ./ Q) * F'
 end
 
 function getC1(c)

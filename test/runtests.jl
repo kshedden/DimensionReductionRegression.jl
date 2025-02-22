@@ -31,9 +31,10 @@ function gendat_linear(n, p, rng)
     return X, y
 end
 
-function gendat_quadratic(n, p, rng)
+function gendat_quadratic(n, p, rng; xsd=ones(p))
 
     X = randn(rng, n, p)
+    X = X * Diagonal(xsd)
     for j in 1:p
         X[:, j] .-= mean(X[:, j])
     end
@@ -48,6 +49,7 @@ function gendat_quadratic(n, p, rng)
 end
 
 include("Aqua.jl")
+include("cume.jl")
 include("opg.jl")
 include("sir.jl")
 include("phd.jl")
