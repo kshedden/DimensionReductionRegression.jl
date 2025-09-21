@@ -4,9 +4,10 @@ using Random
 using LinearAlgebra
 using Statistics
 using StatsBase
-using RCall
+#using RCall
 using StableRNGs
 using Distributions
+using FiniteDifferences
 
 function canonical_angles(A, B)
     A, _, _ = svd(A)
@@ -47,6 +48,8 @@ function gendat_quadratic(n, p, rng; xsd=ones(p))
 
     return X, y
 end
+
+include("dcovdr.jl")
 
 include("Aqua.jl")
 include("cume.jl")

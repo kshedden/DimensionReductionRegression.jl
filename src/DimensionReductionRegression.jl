@@ -2,7 +2,7 @@ module DimensionReductionRegression
 
 using LinearAlgebra
 using Distributions: cdf, Beta
-using StatsBase: corkendall
+using StatsBase: corkendall, sample
 using PrettyTables
 
 import GLM
@@ -24,10 +24,11 @@ export SlicedInverseRegression,
     eig,
     OPG,
     teststat,
+    nvar,
+    DCovDR
 
     # Add methods to StatsAPI
     coef,
-    nvar,
     fit,
     fit!,
     coef,
@@ -48,4 +49,5 @@ include("opg.jl")
 include("mpsir.jl")
 include("diva.jl")
 include("cume.jl")
+include("dcovdr.jl")
 end

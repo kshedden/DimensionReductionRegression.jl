@@ -91,22 +91,8 @@ function SlicedInverseRegression(
     fw = Float64.(ns)
     fw ./= sum(fw)
 
-    return SlicedInverseRegression(
-        y,
-        X,
-        Z,
-        mn,
-        sm,
-        zeros(0, 0),
-        fw,
-        dirs,
-        eigs,
-        eigv,
-        trans,
-        bd,
-        sa,
-        h
-    )
+    return SlicedInverseRegression(y, X, Z, mn, sm, zeros(0, 0), fw, dirs, eigs,
+                                   eigv, trans, bd, sa, h)
 end
 
 function coef(r::SlicedInverseRegression)
@@ -240,11 +226,10 @@ function dimension_test(sir::SlicedInverseRegression; maxdim::Int=nvar(sir), met
 
     # Only test when there are positive degrees of freedom
     p = length(sir.eigs)
-    maxdim = maxdim < 0 ? min(p - 1, sir.nslice - 2) : maxdim
-    maxdim = min(maxdim, min(p - 1, sir.nslice - 2))
+    maxdim = maxdim < 0 ? min(p, sir.nslice-2) : maxdim
 
     stat = nobs(sir) * cumsum(reverse(sir.eigs)) |> reverse
-    k = 0:maxdim
+    k = 0:(maxdim-1)
     dof = (p .- k) .* (sir.nslice .- k .- 1)
 
     return DimensionTest(stat, dof)
@@ -342,7 +327,7 @@ end
 function fit!(sir::SlicedInverseRegression; ndir::Integer = 2)
 
     # Get the SIR directions
-    sir.M = StatsBase.cov(copy(sir.sm'), fweights(sir.fw); corrected = false)
+    sir.M = StatsBase.cov(copy(sir.sm'), fweights(sir.fw); corrected=false)
     eg = eigen(sir.M)
 
     # Raw eigenvalues and eigenvectors, sorted by decreasing eigenvalue
@@ -355,9 +340,7 @@ function fit!(sir::SlicedInverseRegression; ndir::Integer = 2)
     end
 
     # Map back to the original coordinates
-    dirs = eg.vectors[:, end:-1:1]
-    sir.dirs = dirs[:, 1:ndir]
-    sir.dirs = sir.trans \ sir.dirs
+    sir.dirs = sir.trans \ sir.eigv[:, 1:ndir]
 
     # Scale to unit length
     for j = 1:size(sir.dirs, 2)
@@ -372,17 +355,11 @@ Use Sliced Inverse Regression (SIR) to estimate the effective dimension reductio
 
 'y' must be sorted before calling 'fit'.
 """
-function fit(
-    ::Type{SlicedInverseRegression},
-    X::AbstractMatrix,
-    y::AbstractVector;
-    nslice = max(8, size(X, 2) + 3),
-    ndir = min(5, size(X, 2))
-)
+function fit(::Type{SlicedInverseRegression}, X::AbstractMatrix, y::AbstractVector; nslice=max(8, size(X, 2) + 3), ndir=min(5, size(X, 2)))
     if !issorted(y)
         error("y must be sorted")
     end
     sm = SlicedInverseRegression(y, X, nslice)
-    fit!(sm; ndir = ndir)
+    fit!(sm; ndir=ndir)
     return sm
 end

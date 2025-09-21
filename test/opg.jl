@@ -10,7 +10,7 @@
 
     for n_centers in [-1, 100]
         opg = OPG(X, y, Normal(); n_centers=n_centers)
-        fit!(opg; bw=sqrt(p), ndir=2)
+        fit!(opg; ndir=2)
         c = coef(opg)
         aa = canonical_angles(c, ct)
         @test maximum(aa) < 0.07

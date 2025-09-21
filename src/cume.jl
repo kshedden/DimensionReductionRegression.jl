@@ -40,6 +40,11 @@ function fit!(cm::CumulativeSlicingEstimation; ndir=3)
     b = reverse(b; dims=2)
     cm.dirs = R \ b[:, 1:ndir]
     cm.eigs = a
+
+    # Scale to unit length
+    for j = 1:size(cm.dirs, 2)
+        cm.dirs[:, j] ./= norm(cm.dirs[:, j])
+    end
 end
 
 function fit(::Type{CumulativeSlicingEstimation}, X, y; ndir=2, scale=:cov)

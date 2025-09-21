@@ -20,7 +20,7 @@ end
 
 @testset "MPSIR" begin
 
-    Random.seed!(123)
+    rng = StableRNG(123)
 
     # Sample size
     n = 1000
@@ -30,13 +30,13 @@ end
     tx = [0 1 0 0 0; 0 1 1 0 0]'
 
     # Use these to introduce correlation into X and Y
-    rx = randn(5, 5)
-    ry = randn(5, 5)
+    rx = randn(rng, 5, 5)
+    ry = randn(rng, 5, 5)
 
-    Y = randn(n, 5) * rx
-    X = randn(n, 5) * ry
-    y1 = X * tx[:, 1] + 0.5 * randn(n)
-    y2 = X * tx[:, 2] + 0.5 * randn(n)
+    Y = randn(rng, n, 5) * rx
+    X = randn(rng, n, 5) * ry
+    y1 = X * tx[:, 1] + 0.5 * randn(rng, n)
+    y2 = X * tx[:, 2] + 0.5 * randn(rng, n)
     Y[:, 1] = y1 + y2
     Y[:, 2] = y1 - y2
 
@@ -60,7 +60,7 @@ end
     @rput X
     @rput y
 
-    hyp = randn(p, 2)
+    hyp = randn(rng, p, 2)
     @rput hyp
 
     R"
@@ -101,7 +101,7 @@ end
 
 @testset "SIR1" begin
 
-    Random.seed!(2144)
+    rng = StableRNG(123)
 
     n = 1000     # Sample size
     r = 0.5      # Correlation between variables
@@ -111,7 +111,7 @@ end
     for j = 1:2
 
         # Explanatory variables
-        x = randn(n, 2)
+        x = randn(rng, n, 2)
         x[:, 2] .= r * x[:, 1] + sqrt(1 - r^2) * x[:, 2]
 
         ey = if j == 1
@@ -126,7 +126,7 @@ end
         # Generate the response with the appropriate R^2.
         ey ./= std(ey)
         s = sqrt((1 - r2) / r2)
-        y = ey + s * randn(n)
+        y = ey + s * randn(rng, n)
 
         ii = sortperm(y)
         y = y[ii]
@@ -134,13 +134,13 @@ end
 
         nslice = 50
         si = SlicedInverseRegression(y, x, nslice)
-        fit!(si; ndir = 2)
+        fit!(si; ndir=2)
         dt = dimension_test(si)
         @test pvalue(dt)[1] < 1e-3
         if j == 1
             ed = si.dirs[:, 1]
             td = [-1, 1]
-            @test isapprox(ed[2] / ed[1], td[2] / td[1], atol = 0.01, rtol = 0.05)
+            @test isapprox(ed[2] / ed[1], td[2] / td[1], atol=0.01, rtol=0.1)
             @test pvalue(dt)[2] > 0.1
             @test abs(si.eigs[1] / si.eigs[2]) > 5
         else

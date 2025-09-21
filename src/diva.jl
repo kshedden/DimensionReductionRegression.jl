@@ -6,7 +6,7 @@ struct DIVADimensionTest
     dof1::Matrix{Float64}
     dof2::Matrix{Float64}
 
-    # Columns of matrices below correspond to stabilization replications, columns 
+    # Columns of matrices below correspond to stabilization replications, columns
     # are SDR space dimensions.
     stats::Matrix{Float64}
     raw_pvals::Matrix{Float64}
@@ -75,7 +75,7 @@ function _dimension_test_diva(m::DimensionReductionModel; maxdim::Int=nvar(m), n
     stats, pvals, dof1, dof2 = _diva(m, r)
     for j in eachindex(pvals)
         if pvals[j] > alpha
-            return DIVADimensionTest(j - 1, pvals, dof1[:, :], dof2[:, :], stats[:, :], pvals[:, :])
+            return DIVADimensionTest(j-1, pvals, dof1[:, :], dof2[:, :], stats[:, :], pvals[:, :])
         end
     end
 
@@ -127,7 +127,7 @@ function _stabilize_stepdown(m, stats, pvals, dof1, dof2, maxdim, r, alpha)
 
 	nstab = size(stats, 2)
 	p = nvar(m)
-	
+
     pva = []
     for j in 0:maxdim
         # The candidate index set

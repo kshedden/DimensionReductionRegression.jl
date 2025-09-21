@@ -27,6 +27,9 @@ mutable struct PrincipalHessianDirections <: DimensionReductionModel
     "`eigs`: the eigenvalues"
     eigs::AbstractVector
 
+    "`eigv`: the eigenvectors"
+    eigv::AbstractMatrix
+
     "`method`: one of 'y', 'r', or 'q'."
     method::String
 end
@@ -102,17 +105,17 @@ function fit(
     eg = eigen(M)
     ii = sortperm(-abs.(eg.values))
     eigs = eg.values[ii]
-    dirs = eg.vectors[:, ii[1:ndir]]
+    eigv = eg.vectors[:, ii[1:ndir]]
 
     # Map back to the original coordinates
-    dirs = trans \ dirs
+    dirs = trans \ eigv
 
     # Scale to unit length
     for j = 1:size(dirs, 2)
         dirs[:, j] ./= norm(dirs[:, j])
     end
 
-    return PrincipalHessianDirections(y, X, Z, mn, M, dirs, eigs, method)
+    return PrincipalHessianDirections(y, X, Z, mn, M, dirs, eigs, eigv, method)
 end
 
 """
